@@ -2,7 +2,7 @@ exports.main = function(currentPath) {
 	const fs = require("fs");
 	const path = require("path");
 	const basePath = "img/photography";
-	const fullPath = path.resolve(currentPath + "../" + basePath);
+	const fullPath = path.resolve(currentPath + "../docs/" + basePath);
 
 	var html = [];
 	html.push("<div class=\"grid fade\">");

@@ -3,6 +3,5 @@
 		"**/node_modules": true,
 		"**/package-lock.json": true
 	},
-	"python.pythonPath": "/usr/local/opt/python@3.9/bin/python3.9",
 	"makefile.configureOnOpen": false
 }

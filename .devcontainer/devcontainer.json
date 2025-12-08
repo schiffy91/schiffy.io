@@ -1,0 +1,15 @@
+{
+	"name": "Portfolio Dev",
+	"build": {
+		"dockerfile": "Dockerfile"
+	},
+	"initializeCommand": "scripts/configure_podman.sh",
+	"postCreateCommand": "scripts/setup_workspace.sh",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-vscode.makefile-tools"
+			]
+		}
+	}
+}

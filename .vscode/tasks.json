@@ -6,20 +6,20 @@
 		{
 			"label": "open website",
 			"type": "shell",
-			"command": "open index.html",
+			"command": "\"$BROWSER\" docs/index.html",
 			"dependsOn": [
 				"build html"
 			],
-			"group": {
-				"kind": "build",
-				"isDefault": true
-			}
+			"group": "build"
 		},
 		{
 			"label": "build html",
 			"type": "shell",
 			"command": "make html",
-			"group": "build"
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
 		},
 		{
 			"label": "rebuild portfolio",

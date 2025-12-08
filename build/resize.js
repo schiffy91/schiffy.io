@@ -1,5 +1,5 @@
 let fs = require("fs");
-let exec = require("child_process").exec;
+let execSync = require("child_process").execSync;
 
 // Parse arguments
 let args = process.argv.slice(2);
@@ -14,15 +14,9 @@ let maxSize = args[3];
 let outputPath = args[4];
 
 fs.readdirSync(inputPath).forEach(file => {
-	exec(`magick '${inputPath}/${file}' -resize ${resizePercent} -quality ${quality} -define jpeg:extent=${maxSize} '${outputPath}/${file}'`, (error, stdout, stderr) => {
-		if (error) {
-			console.error(error);
-		}
-		if (stderr) {
-			console.error(stderr);
-		}
-		if (stdout) {
-			console.log(stdout);
-		}
-	})
+	try {
+		execSync(`convert '${inputPath}/${file}' -resize ${resizePercent} -quality ${quality} -define jpeg:extent=${maxSize} '${outputPath}/${file}'`, { stdio: 'inherit' });
+	} catch (e) {
+		console.error(`Failed to resize ${file}: ${e}`);
+	}
 });
