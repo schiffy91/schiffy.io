@@ -1,0 +1,49 @@
+{
+  "nodes": {
+    "btrc": {
+      "inputs": {
+        "nixpkgs": "nixpkgs"
+      },
+      "locked": {
+        "lastModified": 1795401499,
+        "narHash": "sha256-nmxHEDjirBn6+Gm2Eb1xriY29afQhdN/9cGOTabhpE0=",
+        "owner": "schiffy91",
+        "repo": "btrc",
+        "rev": "05933973b424460ac764643eb6cb4fa8f927d5c7",
+        "type": "github"
+      },
+      "original": {
+        "owner": "schiffy91",
+        "repo": "btrc",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1784517550,
+        "narHash": "sha256-uH9LkreZXkpZXD0QOXBkQWnAHhlVuT0wUABFw7AN9BU=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "fca2dbd4c00c3063235e56bb91758e24fc67b7b8",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixpkgs-26.05-darwin",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "btrc": "btrc",
+        "nixpkgs": [
+          "btrc",
+          "nixpkgs"
+        ]
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

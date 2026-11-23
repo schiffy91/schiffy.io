@@ -1,8 +1,2 @@
 .DS_Store
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
-node_modules
-package-lock.json
+/result

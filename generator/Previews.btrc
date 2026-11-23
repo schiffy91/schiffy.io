@@ -1,0 +1,47 @@
+import Library.Console;
+import Library.FileSystem;
+import Library.Image.JPEG;
+import ./Photographs.btrc;
+
+bool needsPreview(FileSnapshot original, string path) {
+    if (!FileSystem.exists(path)) { return true; }
+    var status = FileSystem.inspectExact(path);
+    if (!status.ok()) { throw status.error().message(); }
+    return original.modifiedAfter(status.value());
+}
+
+void writePreview(JPEGPhoto photo, string path, int width, int height) {
+    if (!FileSystem.writeAtomicBytes(path, photo.thumbnail(width, height))) { throw f"Could not write {path}"; }
+}
+
+void prepare(string directory, string name) {
+    var path = f"{directory}/medium-res/{name}";
+    var status = FileSystem.inspectExact(path);
+    if (!status.ok()) { throw status.error().message(); }
+    var small = f"{directory}/thumbnail/{name}";
+    var large = f"{directory}/low-res/{name}";
+    var makeSmall = needsPreview(status.value(), small);
+    var makeLarge = needsPreview(status.value(), large);
+    if (!makeSmall && !makeLarge) { return; }
+    try {
+        var photo = JPEGPhoto(FileSystem.readBytes(path));
+        if (makeSmall) { writePreview(photo, small, 240, 240); }
+        if (makeLarge) { writePreview(photo, large, 1280, 960); }
+    } catch (string error) { throw f"{path}: {error}"; }
+}
+
+int main(Vector<string> args) {
+    try {
+        if (!args.isEmpty()) { throw "Usage: previews"; }
+        var directory = "docs/img/photography";
+        var names = Photographs.names(f"{directory}/medium-res");
+        if (FileSystem.mkdirp(f"{directory}/thumbnail") != 0 || FileSystem.mkdirp(f"{directory}/low-res") != 0) {
+            throw f"Could not create preview directories in {directory}";
+        }
+        for name in names { prepare(directory, name); }
+        return 0;
+    } catch (string error) {
+        Console.error(error);
+        return 1;
+    }
+}

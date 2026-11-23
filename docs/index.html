@@ -1,150 +1,135 @@
-<!DOCTYPE html>
-<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:fb="http://ogp.me/ns/fb#">
+<!doctype html>
+<html lang="en">
 <head>
-	<!-- Metadata
-	–––––––––––––––––––––––––––––––––––––––––––––––––– -->
-	<meta charset="utf-8">
-	<title>Alexander Schiffhauer</title>
-	<meta name="description" content="art &amp; tech">
-	<meta name="author" content="Alexander Schiffhauer">
-	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<meta property="og:image" content="img/signature/signature-wide.png" />
-
-	<!-- Font
-	–––––––––––––––––––––––––––––––––––––––––––––––––– -->
-	<link href="https://fonts.googleapis.com/css?family=Libre+Barcode+39+Extended+Text" rel="stylesheet"/>
-
-	<!-- CSS
-	–––––––––––––––––––––––––––––––––––––––––––––––––– -->
-	<link rel="stylesheet" href="css/style.css">
-
-	<!-- JS
-	–––––––––––––––––––––––––––––––––––––––––––––––––– -->
-	<script src="js/shuffle.js"></script>
-	<script src="js/fade.js"></script>
-	<script src="js/lazy.js"></script>
-	<script src="js/lightbox.js"></script>
-	<script src="https://polyfill.io/v2/polyfill.min.js?features=IntersectionObserver"></script>
-
-	<!-- Google Analytics -->
-	<script async src="https://www.googletagmanager.com/gtag/js?id=UA-118264170-1"></script>
-	<script>
-		window.dataLayer = window.dataLayer || [];
-		function gtag(){dataLayer.push(arguments);}
-		gtag("js", new Date());
-		gtag("config", "UA-118264170-1");
-	</script>
-
-	<!-- Favicon
-	–––––––––––––––––––––––––––––––––––––––––––––––––– -->
-	<link rel="apple-touch-icon" sizes="180x180" href="img/favicon/apple-touch-icon.png">
-	<link rel="icon" type="image/png" sizes="32x32" href="img/favicon/favicon-32x32.png">
-	<link rel="icon" type="image/png" sizes="16x16" href="img/favicon/favicon-16x16.png">
-	<link rel="manifest" href="img/favicon/site.webmanifest">
-	<link rel="mask-icon" href="img/favicon/safari-pinned-tab.svg" color="#5bbad5">
-	<link rel="shortcut icon" href="img/favicon/favicon.ico">
-	<meta name="msapplication-TileColor" content="#da532c">
-	<meta name="msapplication-config" content="img/favicon/browserconfig.xml">
-	<meta name="theme-color" content="#ffffff">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Alexander Schiffhauer</title>
+  <meta name="description" content="Photography by Alexander Schiffhauer">
+  <meta name="author" content="Alexander Schiffhauer">
+  <meta property="og:image" content="img/signature/signature-wide.png">
+  <link rel="icon" href="img/favicon/favicon.ico">
+  <link rel="apple-touch-icon" href="img/favicon/apple-touch-icon.png">
+  <link rel="manifest" href="img/favicon/site.webmanifest">
+  <link rel="mask-icon" href="img/favicon/safari-pinned-tab.svg" color="#5bbad5">
+  <meta name="msapplication-config" content="img/favicon/browserconfig.xml">
+  <meta name="theme-color" content="#ffffff">
+  <link rel="stylesheet" href="css/style.css">
+  <script defer src="js/lightbox.js"></script>
 </head>
 <body>
-	<h1 class="fade navbar">
-		<a href="#"></a>schiffy</a>
-		<a href="#"><img src="img/signature/signature-wide.png"/></a>
-	</h1>
-	<div class="grid fade">
-		<img class="lazy thumbnail" src="img/photography/thumbnail/00.jpg" lazy-src="img/photography/low-res/00.jpg" lightbox-src="img/photography/medium-res/00.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/01.jpg" lazy-src="img/photography/low-res/01.jpg" lightbox-src="img/photography/medium-res/01.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/02.jpg" lazy-src="img/photography/low-res/02.jpg" lightbox-src="img/photography/medium-res/02.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/03.jpg" lazy-src="img/photography/low-res/03.jpg" lightbox-src="img/photography/medium-res/03.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/04.jpg" lazy-src="img/photography/low-res/04.jpg" lightbox-src="img/photography/medium-res/04.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/05.jpg" lazy-src="img/photography/low-res/05.jpg" lightbox-src="img/photography/medium-res/05.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/06.jpg" lazy-src="img/photography/low-res/06.jpg" lightbox-src="img/photography/medium-res/06.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/07.jpg" lazy-src="img/photography/low-res/07.jpg" lightbox-src="img/photography/medium-res/07.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/08.jpg" lazy-src="img/photography/low-res/08.jpg" lightbox-src="img/photography/medium-res/08.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/09.jpg" lazy-src="img/photography/low-res/09.jpg" lightbox-src="img/photography/medium-res/09.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/10.jpg" lazy-src="img/photography/low-res/10.jpg" lightbox-src="img/photography/medium-res/10.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/11.jpg" lazy-src="img/photography/low-res/11.jpg" lightbox-src="img/photography/medium-res/11.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/12.jpg" lazy-src="img/photography/low-res/12.jpg" lightbox-src="img/photography/medium-res/12.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/13.jpg" lazy-src="img/photography/low-res/13.jpg" lightbox-src="img/photography/medium-res/13.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/14.jpg" lazy-src="img/photography/low-res/14.jpg" lightbox-src="img/photography/medium-res/14.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/15.jpg" lazy-src="img/photography/low-res/15.jpg" lightbox-src="img/photography/medium-res/15.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/16.jpg" lazy-src="img/photography/low-res/16.jpg" lightbox-src="img/photography/medium-res/16.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/17.jpg" lazy-src="img/photography/low-res/17.jpg" lightbox-src="img/photography/medium-res/17.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/18.jpg" lazy-src="img/photography/low-res/18.jpg" lightbox-src="img/photography/medium-res/18.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/19.jpg" lazy-src="img/photography/low-res/19.jpg" lightbox-src="img/photography/medium-res/19.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/20.jpg" lazy-src="img/photography/low-res/20.jpg" lightbox-src="img/photography/medium-res/20.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/21.jpg" lazy-src="img/photography/low-res/21.jpg" lightbox-src="img/photography/medium-res/21.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/22.jpg" lazy-src="img/photography/low-res/22.jpg" lightbox-src="img/photography/medium-res/22.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/23.jpg" lazy-src="img/photography/low-res/23.jpg" lightbox-src="img/photography/medium-res/23.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/24.jpg" lazy-src="img/photography/low-res/24.jpg" lightbox-src="img/photography/medium-res/24.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/25.jpg" lazy-src="img/photography/low-res/25.jpg" lightbox-src="img/photography/medium-res/25.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/26.jpg" lazy-src="img/photography/low-res/26.jpg" lightbox-src="img/photography/medium-res/26.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/27.jpg" lazy-src="img/photography/low-res/27.jpg" lightbox-src="img/photography/medium-res/27.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/28.jpg" lazy-src="img/photography/low-res/28.jpg" lightbox-src="img/photography/medium-res/28.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/29.jpg" lazy-src="img/photography/low-res/29.jpg" lightbox-src="img/photography/medium-res/29.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/30.jpg" lazy-src="img/photography/low-res/30.jpg" lightbox-src="img/photography/medium-res/30.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/31.jpg" lazy-src="img/photography/low-res/31.jpg" lightbox-src="img/photography/medium-res/31.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/32.jpg" lazy-src="img/photography/low-res/32.jpg" lightbox-src="img/photography/medium-res/32.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/33.jpg" lazy-src="img/photography/low-res/33.jpg" lightbox-src="img/photography/medium-res/33.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/34.jpg" lazy-src="img/photography/low-res/34.jpg" lightbox-src="img/photography/medium-res/34.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/35.jpg" lazy-src="img/photography/low-res/35.jpg" lightbox-src="img/photography/medium-res/35.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/36.jpg" lazy-src="img/photography/low-res/36.jpg" lightbox-src="img/photography/medium-res/36.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/37.jpg" lazy-src="img/photography/low-res/37.jpg" lightbox-src="img/photography/medium-res/37.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/38.jpg" lazy-src="img/photography/low-res/38.jpg" lightbox-src="img/photography/medium-res/38.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/39.jpg" lazy-src="img/photography/low-res/39.jpg" lightbox-src="img/photography/medium-res/39.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/40.jpg" lazy-src="img/photography/low-res/40.jpg" lightbox-src="img/photography/medium-res/40.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/41.jpg" lazy-src="img/photography/low-res/41.jpg" lightbox-src="img/photography/medium-res/41.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/42.jpg" lazy-src="img/photography/low-res/42.jpg" lightbox-src="img/photography/medium-res/42.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/43.jpg" lazy-src="img/photography/low-res/43.jpg" lightbox-src="img/photography/medium-res/43.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/44.jpg" lazy-src="img/photography/low-res/44.jpg" lightbox-src="img/photography/medium-res/44.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/45.jpg" lazy-src="img/photography/low-res/45.jpg" lightbox-src="img/photography/medium-res/45.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/46.jpg" lazy-src="img/photography/low-res/46.jpg" lightbox-src="img/photography/medium-res/46.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/47.jpg" lazy-src="img/photography/low-res/47.jpg" lightbox-src="img/photography/medium-res/47.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/48.jpg" lazy-src="img/photography/low-res/48.jpg" lightbox-src="img/photography/medium-res/48.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/49.jpg" lazy-src="img/photography/low-res/49.jpg" lightbox-src="img/photography/medium-res/49.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/50.jpg" lazy-src="img/photography/low-res/50.jpg" lightbox-src="img/photography/medium-res/50.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/51.jpg" lazy-src="img/photography/low-res/51.jpg" lightbox-src="img/photography/medium-res/51.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/52.jpg" lazy-src="img/photography/low-res/52.jpg" lightbox-src="img/photography/medium-res/52.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/53.jpg" lazy-src="img/photography/low-res/53.jpg" lightbox-src="img/photography/medium-res/53.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/54.jpg" lazy-src="img/photography/low-res/54.jpg" lightbox-src="img/photography/medium-res/54.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/55.jpg" lazy-src="img/photography/low-res/55.jpg" lightbox-src="img/photography/medium-res/55.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/56.jpg" lazy-src="img/photography/low-res/56.jpg" lightbox-src="img/photography/medium-res/56.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/57.jpg" lazy-src="img/photography/low-res/57.jpg" lightbox-src="img/photography/medium-res/57.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/58.jpg" lazy-src="img/photography/low-res/58.jpg" lightbox-src="img/photography/medium-res/58.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/59.jpg" lazy-src="img/photography/low-res/59.jpg" lightbox-src="img/photography/medium-res/59.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/60.jpg" lazy-src="img/photography/low-res/60.jpg" lightbox-src="img/photography/medium-res/60.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/61.jpg" lazy-src="img/photography/low-res/61.jpg" lightbox-src="img/photography/medium-res/61.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/62.jpg" lazy-src="img/photography/low-res/62.jpg" lightbox-src="img/photography/medium-res/62.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/63.jpg" lazy-src="img/photography/low-res/63.jpg" lightbox-src="img/photography/medium-res/63.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/64.jpg" lazy-src="img/photography/low-res/64.jpg" lightbox-src="img/photography/medium-res/64.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/65.jpg" lazy-src="img/photography/low-res/65.jpg" lightbox-src="img/photography/medium-res/65.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/66.jpg" lazy-src="img/photography/low-res/66.jpg" lightbox-src="img/photography/medium-res/66.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/67.jpg" lazy-src="img/photography/low-res/67.jpg" lightbox-src="img/photography/medium-res/67.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/68.jpg" lazy-src="img/photography/low-res/68.jpg" lightbox-src="img/photography/medium-res/68.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/69.jpg" lazy-src="img/photography/low-res/69.jpg" lightbox-src="img/photography/medium-res/69.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/70.jpg" lazy-src="img/photography/low-res/70.jpg" lightbox-src="img/photography/medium-res/70.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/71.jpg" lazy-src="img/photography/low-res/71.jpg" lightbox-src="img/photography/medium-res/71.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/72.jpg" lazy-src="img/photography/low-res/72.jpg" lightbox-src="img/photography/medium-res/72.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/73.jpg" lazy-src="img/photography/low-res/73.jpg" lightbox-src="img/photography/medium-res/73.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/74.jpg" lazy-src="img/photography/low-res/74.jpg" lightbox-src="img/photography/medium-res/74.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/75.jpg" lazy-src="img/photography/low-res/75.jpg" lightbox-src="img/photography/medium-res/75.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/76.jpg" lazy-src="img/photography/low-res/76.jpg" lightbox-src="img/photography/medium-res/76.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/77.jpg" lazy-src="img/photography/low-res/77.jpg" lightbox-src="img/photography/medium-res/77.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/78.jpg" lazy-src="img/photography/low-res/78.jpg" lightbox-src="img/photography/medium-res/78.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/79.jpg" lazy-src="img/photography/low-res/79.jpg" lightbox-src="img/photography/medium-res/79.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/80.jpg" lazy-src="img/photography/low-res/80.jpg" lightbox-src="img/photography/medium-res/80.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/81.jpg" lazy-src="img/photography/low-res/81.jpg" lightbox-src="img/photography/medium-res/81.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/82.jpg" lazy-src="img/photography/low-res/82.jpg" lightbox-src="img/photography/medium-res/82.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/83.jpg" lazy-src="img/photography/low-res/83.jpg" lightbox-src="img/photography/medium-res/83.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/84.jpg" lazy-src="img/photography/low-res/84.jpg" lightbox-src="img/photography/medium-res/84.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/85.jpg" lazy-src="img/photography/low-res/85.jpg" lightbox-src="img/photography/medium-res/85.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/86.jpg" lazy-src="img/photography/low-res/86.jpg" lightbox-src="img/photography/medium-res/86.jpg"/>
-		<img class="lazy thumbnail" src="img/photography/thumbnail/87.jpg" lazy-src="img/photography/low-res/87.jpg" lightbox-src="img/photography/medium-res/87.jpg"/>
-	</div>
-	<div class="lightbox">
-		<a href="#"><img class="arrow" src="img/arrows/left.png"/></a>
-		<img class="frame"/>
-		<a href="#"><img class="arrow" src="img/arrows/right.png"/></a>
-	</div>
+  <header>
+    <h1>schiffy</h1>
+    <img src="img/signature/signature-wide.png" alt="Alexander Schiffhauer">
+  </header>
+  <main class="gallery" aria-label="Photography">
+    <a href="img/photography/medium-res/00.jpg" style="--w:1920;--h:1107"><img src="img/photography/low-res/00.jpg" srcset="img/photography/thumbnail/00.jpg 192w, img/photography/low-res/00.jpg 960w" sizes="auto, 100vw" width="1920" height="1107" alt="Photograph 1" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/01.jpg" style="--w:1281;--h:1920"><img src="img/photography/low-res/01.jpg" srcset="img/photography/thumbnail/01.jpg 128w, img/photography/low-res/01.jpg 641w" sizes="auto, 100vw" width="1281" height="1920" alt="Photograph 2" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/02.jpg" style="--w:1920;--h:1280"><img src="img/photography/low-res/02.jpg" srcset="img/photography/thumbnail/02.jpg 192w, img/photography/low-res/02.jpg 960w" sizes="auto, 100vw" width="1920" height="1280" alt="Photograph 3" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/03.jpg" style="--w:1223;--h:1920"><img src="img/photography/low-res/03.jpg" srcset="img/photography/thumbnail/03.jpg 122w, img/photography/low-res/03.jpg 612w" sizes="auto, 100vw" width="1223" height="1920" alt="Photograph 4" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/04.jpg" style="--w:1920;--h:1282"><img src="img/photography/low-res/04.jpg" srcset="img/photography/thumbnail/04.jpg 192w, img/photography/low-res/04.jpg 960w" sizes="auto, 100vw" width="1920" height="1282" alt="Photograph 5" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/05.jpg" style="--w:1280;--h:1920"><img src="img/photography/low-res/05.jpg" srcset="img/photography/thumbnail/05.jpg 128w, img/photography/low-res/05.jpg 640w" sizes="auto, 100vw" width="1280" height="1920" alt="Photograph 6" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/06.jpg" style="--w:1920;--h:1282"><img src="img/photography/low-res/06.jpg" srcset="img/photography/thumbnail/06.jpg 192w, img/photography/low-res/06.jpg 960w" sizes="auto, 100vw" width="1920" height="1282" alt="Photograph 7" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/07.jpg" style="--w:1920;--h:1080"><img src="img/photography/low-res/07.jpg" srcset="img/photography/thumbnail/07.jpg 192w, img/photography/low-res/07.jpg 960w" sizes="auto, 100vw" width="1920" height="1080" alt="Photograph 8" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/08.jpg" style="--w:1920;--h:1687"><img src="img/photography/low-res/08.jpg" srcset="img/photography/thumbnail/08.jpg 192w, img/photography/low-res/08.jpg 960w" sizes="auto, 100vw" width="1920" height="1687" alt="Photograph 9" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/09.jpg" style="--w:1920;--h:1282"><img src="img/photography/low-res/09.jpg" srcset="img/photography/thumbnail/09.jpg 192w, img/photography/low-res/09.jpg 960w" sizes="auto, 100vw" width="1920" height="1282" alt="Photograph 10" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/10.jpg" style="--w:1281;--h:1920"><img src="img/photography/low-res/10.jpg" srcset="img/photography/thumbnail/10.jpg 128w, img/photography/low-res/10.jpg 641w" sizes="auto, 100vw" width="1281" height="1920" alt="Photograph 11" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/11.jpg" style="--w:1920;--h:1080"><img src="img/photography/low-res/11.jpg" srcset="img/photography/thumbnail/11.jpg 192w, img/photography/low-res/11.jpg 960w" sizes="auto, 100vw" width="1920" height="1080" alt="Photograph 12" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/12.jpg" style="--w:1920;--h:1282"><img src="img/photography/low-res/12.jpg" srcset="img/photography/thumbnail/12.jpg 192w, img/photography/low-res/12.jpg 960w" sizes="auto, 100vw" width="1920" height="1282" alt="Photograph 13" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/13.jpg" style="--w:1920;--h:1282"><img src="img/photography/low-res/13.jpg" srcset="img/photography/thumbnail/13.jpg 192w, img/photography/low-res/13.jpg 960w" sizes="auto, 100vw" width="1920" height="1282" alt="Photograph 14" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/14.jpg" style="--w:1920;--h:1282"><img src="img/photography/low-res/14.jpg" srcset="img/photography/thumbnail/14.jpg 192w, img/photography/low-res/14.jpg 960w" sizes="auto, 100vw" width="1920" height="1282" alt="Photograph 15" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/15.jpg" style="--w:1371;--h:1920"><img src="img/photography/low-res/15.jpg" srcset="img/photography/thumbnail/15.jpg 137w, img/photography/low-res/15.jpg 686w" sizes="auto, 100vw" width="1371" height="1920" alt="Photograph 16" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/16.jpg" style="--w:1920;--h:1080"><img src="img/photography/low-res/16.jpg" srcset="img/photography/thumbnail/16.jpg 192w, img/photography/low-res/16.jpg 960w" sizes="auto, 100vw" width="1920" height="1080" alt="Photograph 17" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/17.jpg" style="--w:1920;--h:1282"><img src="img/photography/low-res/17.jpg" srcset="img/photography/thumbnail/17.jpg 192w, img/photography/low-res/17.jpg 960w" sizes="auto, 100vw" width="1920" height="1282" alt="Photograph 18" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/18.jpg" style="--w:1920;--h:1282"><img src="img/photography/low-res/18.jpg" srcset="img/photography/thumbnail/18.jpg 192w, img/photography/low-res/18.jpg 960w" sizes="auto, 100vw" width="1920" height="1282" alt="Photograph 19" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/19.jpg" style="--w:1920;--h:1279"><img src="img/photography/low-res/19.jpg" srcset="img/photography/thumbnail/19.jpg 192w, img/photography/low-res/19.jpg 960w" sizes="auto, 100vw" width="1920" height="1279" alt="Photograph 20" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/20.jpg" style="--w:1281;--h:1920"><img src="img/photography/low-res/20.jpg" srcset="img/photography/thumbnail/20.jpg 128w, img/photography/low-res/20.jpg 641w" sizes="auto, 100vw" width="1281" height="1920" alt="Photograph 21" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/21.jpg" style="--w:1920;--h:1080"><img src="img/photography/low-res/21.jpg" srcset="img/photography/thumbnail/21.jpg 192w, img/photography/low-res/21.jpg 960w" sizes="auto, 100vw" width="1920" height="1080" alt="Photograph 22" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/22.jpg" style="--w:1282;--h:1920"><img src="img/photography/low-res/22.jpg" srcset="img/photography/thumbnail/22.jpg 128w, img/photography/low-res/22.jpg 641w" sizes="auto, 100vw" width="1282" height="1920" alt="Photograph 23" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/23.jpg" style="--w:1920;--h:1080"><img src="img/photography/low-res/23.jpg" srcset="img/photography/thumbnail/23.jpg 192w, img/photography/low-res/23.jpg 960w" sizes="auto, 100vw" width="1920" height="1080" alt="Photograph 24" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/24.jpg" style="--w:1920;--h:881"><img src="img/photography/low-res/24.jpg" srcset="img/photography/thumbnail/24.jpg 192w, img/photography/low-res/24.jpg 960w" sizes="auto, 100vw" width="1920" height="881" alt="Photograph 25" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/25.jpg" style="--w:1920;--h:1282"><img src="img/photography/low-res/25.jpg" srcset="img/photography/thumbnail/25.jpg 192w, img/photography/low-res/25.jpg 960w" sizes="auto, 100vw" width="1920" height="1282" alt="Photograph 26" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/26.jpg" style="--w:1920;--h:1080"><img src="img/photography/low-res/26.jpg" srcset="img/photography/thumbnail/26.jpg 192w, img/photography/low-res/26.jpg 960w" sizes="auto, 100vw" width="1920" height="1080" alt="Photograph 27" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/27.jpg" style="--w:1920;--h:1282"><img src="img/photography/low-res/27.jpg" srcset="img/photography/thumbnail/27.jpg 192w, img/photography/low-res/27.jpg 960w" sizes="auto, 100vw" width="1920" height="1282" alt="Photograph 28" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/28.jpg" style="--w:1282;--h:1920"><img src="img/photography/low-res/28.jpg" srcset="img/photography/thumbnail/28.jpg 128w, img/photography/low-res/28.jpg 641w" sizes="auto, 100vw" width="1282" height="1920" alt="Photograph 29" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/29.jpg" style="--w:1920;--h:1282"><img src="img/photography/low-res/29.jpg" srcset="img/photography/thumbnail/29.jpg 192w, img/photography/low-res/29.jpg 960w" sizes="auto, 100vw" width="1920" height="1282" alt="Photograph 30" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/30.jpg" style="--w:1920;--h:1282"><img src="img/photography/low-res/30.jpg" srcset="img/photography/thumbnail/30.jpg 192w, img/photography/low-res/30.jpg 960w" sizes="auto, 100vw" width="1920" height="1282" alt="Photograph 31" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/31.jpg" style="--w:1920;--h:1080"><img src="img/photography/low-res/31.jpg" srcset="img/photography/thumbnail/31.jpg 192w, img/photography/low-res/31.jpg 960w" sizes="auto, 100vw" width="1920" height="1080" alt="Photograph 32" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/32.jpg" style="--w:1920;--h:1080"><img src="img/photography/low-res/32.jpg" srcset="img/photography/thumbnail/32.jpg 192w, img/photography/low-res/32.jpg 960w" sizes="auto, 100vw" width="1920" height="1080" alt="Photograph 33" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/33.jpg" style="--w:1280;--h:1920"><img src="img/photography/low-res/33.jpg" srcset="img/photography/thumbnail/33.jpg 128w, img/photography/low-res/33.jpg 640w" sizes="auto, 100vw" width="1280" height="1920" alt="Photograph 34" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/34.jpg" style="--w:1920;--h:1080"><img src="img/photography/low-res/34.jpg" srcset="img/photography/thumbnail/34.jpg 192w, img/photography/low-res/34.jpg 960w" sizes="auto, 100vw" width="1920" height="1080" alt="Photograph 35" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/35.jpg" style="--w:1920;--h:1080"><img src="img/photography/low-res/35.jpg" srcset="img/photography/thumbnail/35.jpg 192w, img/photography/low-res/35.jpg 960w" sizes="auto, 100vw" width="1920" height="1080" alt="Photograph 36" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/36.jpg" style="--w:1920;--h:1282"><img src="img/photography/low-res/36.jpg" srcset="img/photography/thumbnail/36.jpg 192w, img/photography/low-res/36.jpg 960w" sizes="auto, 100vw" width="1920" height="1282" alt="Photograph 37" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/37.jpg" style="--w:1281;--h:1920"><img src="img/photography/low-res/37.jpg" srcset="img/photography/thumbnail/37.jpg 128w, img/photography/low-res/37.jpg 641w" sizes="auto, 100vw" width="1281" height="1920" alt="Photograph 38" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/38.jpg" style="--w:1920;--h:1282"><img src="img/photography/low-res/38.jpg" srcset="img/photography/thumbnail/38.jpg 192w, img/photography/low-res/38.jpg 960w" sizes="auto, 100vw" width="1920" height="1282" alt="Photograph 39" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/39.jpg" style="--w:1280;--h:1920"><img src="img/photography/low-res/39.jpg" srcset="img/photography/thumbnail/39.jpg 128w, img/photography/low-res/39.jpg 640w" sizes="auto, 100vw" width="1280" height="1920" alt="Photograph 40" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/40.jpg" style="--w:1920;--h:1291"><img src="img/photography/low-res/40.jpg" srcset="img/photography/thumbnail/40.jpg 192w, img/photography/low-res/40.jpg 960w" sizes="auto, 100vw" width="1920" height="1291" alt="Photograph 41" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/41.jpg" style="--w:1282;--h:1920"><img src="img/photography/low-res/41.jpg" srcset="img/photography/thumbnail/41.jpg 128w, img/photography/low-res/41.jpg 641w" sizes="auto, 100vw" width="1282" height="1920" alt="Photograph 42" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/42.jpg" style="--w:1920;--h:1281"><img src="img/photography/low-res/42.jpg" srcset="img/photography/thumbnail/42.jpg 192w, img/photography/low-res/42.jpg 960w" sizes="auto, 100vw" width="1920" height="1281" alt="Photograph 43" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/43.jpg" style="--w:1920;--h:1282"><img src="img/photography/low-res/43.jpg" srcset="img/photography/thumbnail/43.jpg 192w, img/photography/low-res/43.jpg 960w" sizes="auto, 100vw" width="1920" height="1282" alt="Photograph 44" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/44.jpg" style="--w:1920;--h:1282"><img src="img/photography/low-res/44.jpg" srcset="img/photography/thumbnail/44.jpg 192w, img/photography/low-res/44.jpg 960w" sizes="auto, 100vw" width="1920" height="1282" alt="Photograph 45" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/45.jpg" style="--w:1920;--h:1282"><img src="img/photography/low-res/45.jpg" srcset="img/photography/thumbnail/45.jpg 192w, img/photography/low-res/45.jpg 960w" sizes="auto, 100vw" width="1920" height="1282" alt="Photograph 46" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/46.jpg" style="--w:1920;--h:1080"><img src="img/photography/low-res/46.jpg" srcset="img/photography/thumbnail/46.jpg 192w, img/photography/low-res/46.jpg 960w" sizes="auto, 100vw" width="1920" height="1080" alt="Photograph 47" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/47.jpg" style="--w:1920;--h:1282"><img src="img/photography/low-res/47.jpg" srcset="img/photography/thumbnail/47.jpg 192w, img/photography/low-res/47.jpg 960w" sizes="auto, 100vw" width="1920" height="1282" alt="Photograph 48" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/48.jpg" style="--w:1282;--h:1920"><img src="img/photography/low-res/48.jpg" srcset="img/photography/thumbnail/48.jpg 128w, img/photography/low-res/48.jpg 641w" sizes="auto, 100vw" width="1282" height="1920" alt="Photograph 49" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/49.jpg" style="--w:1920;--h:1371"><img src="img/photography/low-res/49.jpg" srcset="img/photography/thumbnail/49.jpg 192w, img/photography/low-res/49.jpg 960w" sizes="auto, 100vw" width="1920" height="1371" alt="Photograph 50" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/50.jpg" style="--w:1920;--h:1080"><img src="img/photography/low-res/50.jpg" srcset="img/photography/thumbnail/50.jpg 192w, img/photography/low-res/50.jpg 960w" sizes="auto, 100vw" width="1920" height="1080" alt="Photograph 51" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/51.jpg" style="--w:1920;--h:1440"><img src="img/photography/low-res/51.jpg" srcset="img/photography/thumbnail/51.jpg 192w, img/photography/low-res/51.jpg 960w" sizes="auto, 100vw" width="1920" height="1440" alt="Photograph 52" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/52.jpg" style="--w:1282;--h:1920"><img src="img/photography/low-res/52.jpg" srcset="img/photography/thumbnail/52.jpg 128w, img/photography/low-res/52.jpg 641w" sizes="auto, 100vw" width="1282" height="1920" alt="Photograph 53" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/53.jpg" style="--w:1282;--h:1920"><img src="img/photography/low-res/53.jpg" srcset="img/photography/thumbnail/53.jpg 128w, img/photography/low-res/53.jpg 641w" sizes="auto, 100vw" width="1282" height="1920" alt="Photograph 54" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/54.jpg" style="--w:1920;--h:1080"><img src="img/photography/low-res/54.jpg" srcset="img/photography/thumbnail/54.jpg 192w, img/photography/low-res/54.jpg 960w" sizes="auto, 100vw" width="1920" height="1080" alt="Photograph 55" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/55.jpg" style="--w:1920;--h:1080"><img src="img/photography/low-res/55.jpg" srcset="img/photography/thumbnail/55.jpg 192w, img/photography/low-res/55.jpg 960w" sizes="auto, 100vw" width="1920" height="1080" alt="Photograph 56" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/56.jpg" style="--w:1920;--h:1080"><img src="img/photography/low-res/56.jpg" srcset="img/photography/thumbnail/56.jpg 192w, img/photography/low-res/56.jpg 960w" sizes="auto, 100vw" width="1920" height="1080" alt="Photograph 57" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/57.jpg" style="--w:1281;--h:1920"><img src="img/photography/low-res/57.jpg" srcset="img/photography/thumbnail/57.jpg 128w, img/photography/low-res/57.jpg 641w" sizes="auto, 100vw" width="1281" height="1920" alt="Photograph 58" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/58.jpg" style="--w:1920;--h:1282"><img src="img/photography/low-res/58.jpg" srcset="img/photography/thumbnail/58.jpg 192w, img/photography/low-res/58.jpg 960w" sizes="auto, 100vw" width="1920" height="1282" alt="Photograph 59" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/59.jpg" style="--w:1920;--h:1080"><img src="img/photography/low-res/59.jpg" srcset="img/photography/thumbnail/59.jpg 192w, img/photography/low-res/59.jpg 960w" sizes="auto, 100vw" width="1920" height="1080" alt="Photograph 60" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/60.jpg" style="--w:1282;--h:1920"><img src="img/photography/low-res/60.jpg" srcset="img/photography/thumbnail/60.jpg 128w, img/photography/low-res/60.jpg 641w" sizes="auto, 100vw" width="1282" height="1920" alt="Photograph 61" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/61.jpg" style="--w:1920;--h:1281"><img src="img/photography/low-res/61.jpg" srcset="img/photography/thumbnail/61.jpg 192w, img/photography/low-res/61.jpg 960w" sizes="auto, 100vw" width="1920" height="1281" alt="Photograph 62" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/62.jpg" style="--w:1920;--h:1080"><img src="img/photography/low-res/62.jpg" srcset="img/photography/thumbnail/62.jpg 192w, img/photography/low-res/62.jpg 960w" sizes="auto, 100vw" width="1920" height="1080" alt="Photograph 63" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/63.jpg" style="--w:1920;--h:1080"><img src="img/photography/low-res/63.jpg" srcset="img/photography/thumbnail/63.jpg 192w, img/photography/low-res/63.jpg 960w" sizes="auto, 100vw" width="1920" height="1080" alt="Photograph 64" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/64.jpg" style="--w:1383;--h:1920"><img src="img/photography/low-res/64.jpg" srcset="img/photography/thumbnail/64.jpg 138w, img/photography/low-res/64.jpg 692w" sizes="auto, 100vw" width="1383" height="1920" alt="Photograph 65" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/65.jpg" style="--w:1442;--h:1920"><img src="img/photography/low-res/65.jpg" srcset="img/photography/thumbnail/65.jpg 144w, img/photography/low-res/65.jpg 721w" sizes="auto, 100vw" width="1442" height="1920" alt="Photograph 66" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/66.jpg" style="--w:1709;--h:1920"><img src="img/photography/low-res/66.jpg" srcset="img/photography/thumbnail/66.jpg 171w, img/photography/low-res/66.jpg 855w" sizes="auto, 100vw" width="1709" height="1920" alt="Photograph 67" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/67.jpg" style="--w:1282;--h:1920"><img src="img/photography/low-res/67.jpg" srcset="img/photography/thumbnail/67.jpg 128w, img/photography/low-res/67.jpg 641w" sizes="auto, 100vw" width="1282" height="1920" alt="Photograph 68" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/68.jpg" style="--w:1920;--h:1282"><img src="img/photography/low-res/68.jpg" srcset="img/photography/thumbnail/68.jpg 192w, img/photography/low-res/68.jpg 960w" sizes="auto, 100vw" width="1920" height="1282" alt="Photograph 69" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/69.jpg" style="--w:1281;--h:1920"><img src="img/photography/low-res/69.jpg" srcset="img/photography/thumbnail/69.jpg 128w, img/photography/low-res/69.jpg 641w" sizes="auto, 100vw" width="1281" height="1920" alt="Photograph 70" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/70.jpg" style="--w:1920;--h:1920"><img src="img/photography/low-res/70.jpg" srcset="img/photography/thumbnail/70.jpg 192w, img/photography/low-res/70.jpg 960w" sizes="auto, 100vw" width="1920" height="1920" alt="Photograph 71" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/71.jpg" style="--w:1920;--h:1282"><img src="img/photography/low-res/71.jpg" srcset="img/photography/thumbnail/71.jpg 192w, img/photography/low-res/71.jpg 960w" sizes="auto, 100vw" width="1920" height="1282" alt="Photograph 72" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/72.jpg" style="--w:1282;--h:1920"><img src="img/photography/low-res/72.jpg" srcset="img/photography/thumbnail/72.jpg 128w, img/photography/low-res/72.jpg 641w" sizes="auto, 100vw" width="1282" height="1920" alt="Photograph 73" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/73.jpg" style="--w:1281;--h:1920"><img src="img/photography/low-res/73.jpg" srcset="img/photography/thumbnail/73.jpg 128w, img/photography/low-res/73.jpg 641w" sizes="auto, 100vw" width="1281" height="1920" alt="Photograph 74" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/74.jpg" style="--w:1920;--h:1080"><img src="img/photography/low-res/74.jpg" srcset="img/photography/thumbnail/74.jpg 192w, img/photography/low-res/74.jpg 960w" sizes="auto, 100vw" width="1920" height="1080" alt="Photograph 75" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/75.jpg" style="--w:1920;--h:1281"><img src="img/photography/low-res/75.jpg" srcset="img/photography/thumbnail/75.jpg 192w, img/photography/low-res/75.jpg 960w" sizes="auto, 100vw" width="1920" height="1281" alt="Photograph 76" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/76.jpg" style="--w:1920;--h:1282"><img src="img/photography/low-res/76.jpg" srcset="img/photography/thumbnail/76.jpg 192w, img/photography/low-res/76.jpg 960w" sizes="auto, 100vw" width="1920" height="1282" alt="Photograph 77" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/77.jpg" style="--w:1920;--h:1282"><img src="img/photography/low-res/77.jpg" srcset="img/photography/thumbnail/77.jpg 192w, img/photography/low-res/77.jpg 960w" sizes="auto, 100vw" width="1920" height="1282" alt="Photograph 78" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/78.jpg" style="--w:1920;--h:1080"><img src="img/photography/low-res/78.jpg" srcset="img/photography/thumbnail/78.jpg 192w, img/photography/low-res/78.jpg 960w" sizes="auto, 100vw" width="1920" height="1080" alt="Photograph 79" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/79.jpg" style="--w:1920;--h:1281"><img src="img/photography/low-res/79.jpg" srcset="img/photography/thumbnail/79.jpg 192w, img/photography/low-res/79.jpg 960w" sizes="auto, 100vw" width="1920" height="1281" alt="Photograph 80" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/80.jpg" style="--w:1920;--h:1562"><img src="img/photography/low-res/80.jpg" srcset="img/photography/thumbnail/80.jpg 192w, img/photography/low-res/80.jpg 960w" sizes="auto, 100vw" width="1920" height="1562" alt="Photograph 81" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/81.jpg" style="--w:1920;--h:1282"><img src="img/photography/low-res/81.jpg" srcset="img/photography/thumbnail/81.jpg 192w, img/photography/low-res/81.jpg 960w" sizes="auto, 100vw" width="1920" height="1282" alt="Photograph 82" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/82.jpg" style="--w:1920;--h:1282"><img src="img/photography/low-res/82.jpg" srcset="img/photography/thumbnail/82.jpg 192w, img/photography/low-res/82.jpg 960w" sizes="auto, 100vw" width="1920" height="1282" alt="Photograph 83" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/83.jpg" style="--w:1282;--h:1920"><img src="img/photography/low-res/83.jpg" srcset="img/photography/thumbnail/83.jpg 128w, img/photography/low-res/83.jpg 641w" sizes="auto, 100vw" width="1282" height="1920" alt="Photograph 84" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/84.jpg" style="--w:1920;--h:1173"><img src="img/photography/low-res/84.jpg" srcset="img/photography/thumbnail/84.jpg 192w, img/photography/low-res/84.jpg 960w" sizes="auto, 100vw" width="1920" height="1173" alt="Photograph 85" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/85.jpg" style="--w:1920;--h:1282"><img src="img/photography/low-res/85.jpg" srcset="img/photography/thumbnail/85.jpg 192w, img/photography/low-res/85.jpg 960w" sizes="auto, 100vw" width="1920" height="1282" alt="Photograph 86" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/86.jpg" style="--w:1281;--h:1920"><img src="img/photography/low-res/86.jpg" srcset="img/photography/thumbnail/86.jpg 128w, img/photography/low-res/86.jpg 641w" sizes="auto, 100vw" width="1281" height="1920" alt="Photograph 87" loading="lazy" decoding="async"></a>
+    <a href="img/photography/medium-res/87.jpg" style="--w:1376;--h:1920"><img src="img/photography/low-res/87.jpg" srcset="img/photography/thumbnail/87.jpg 138w, img/photography/low-res/87.jpg 688w" sizes="auto, 100vw" width="1376" height="1920" alt="Photograph 88" loading="lazy" decoding="async"></a>
+  </main>
+  <dialog aria-label="Photo viewer">
+    <div class="stage">
+      <div class="frame"></div>
+      <div class="minimap" hidden title="Drag to pan">
+        <img alt="" draggable="false">
+        <span></span>
+      </div>
+    </div>
+    <div class="controls">
+      <button id="previous" aria-label="Previous photograph" title="Previous (←)">←</button>
+      <span id="counter" aria-live="polite"></span>
+      <button id="next" aria-label="Next photograph" title="Next (→)">→</button>
+      <span class="spacer"></span>
+      <button id="smaller" aria-label="Zoom out" title="Zoom out (−)">−</button>
+      <button id="fit" aria-label="Fit photograph to screen" title="Fit to screen (0)">100%</button>
+      <button id="larger" aria-label="Zoom in" title="Zoom in (+)">+</button>
+      <button id="close" aria-label="Close viewer" title="Close (Esc)" autofocus>×</button>
+    </div>
+    <p id="notice" role="status"></p>
+  </dialog>
 </body>
+</html>

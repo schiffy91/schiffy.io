@@ -1,0 +1,46 @@
+import Library.Bytes;
+import Library.Console;
+import Library.FileSystem;
+import Library.HTTP.HTTPUrl;
+import Library.Vector;
+import ./Photographs.btrc;
+
+void render(string root, string templatePath) {
+    var template = FileSystem.readText(templatePath);
+    var marker = "<!-- photos -->";
+    if (!template.contains(marker)) { throw f"Missing photo insertion point in {templatePath}"; }
+    var photos = "img/photography";
+    var directory = f"{root}/{photos}/medium-res";
+    Vector<string> tiles = [];
+    for name in Photographs.names(directory) {
+        var size = Photographs.header(f"{directory}/{name}");
+        var url = HTTPUrl.encode(name);
+        var full = f"{photos}/medium-res/{url}";
+        var preview = FileSystem.isFile(f"{root}/{photos}/low-res/{name}") ? f"{photos}/low-res/{url}" : full;
+        var sources = "";
+        if (FileSystem.isFile(f"{root}/{photos}/thumbnail/{name}")) {
+            var small = Photographs.header(f"{root}/{photos}/thumbnail/{name}");
+            var large = preview == full ? size : Photographs.header(f"{root}/{photos}/low-res/{name}");
+            if (small.width < large.width) {
+                sources = f" srcset=\"{photos}/thumbnail/{url} {small.width}w, {preview} {large.width}w\" sizes=\"auto, 100vw\"";
+            }
+        }
+        var number = tiles.length + 1;
+        var image = f"<img src=\"{preview}\"{sources} width=\"{size.width}\" height=\"{size.height}\" alt=\"Photograph {number}\" loading=\"lazy\" decoding=\"async\">";
+        tiles.push(f"    <a href=\"{full}\" style=\"--w:{size.width};--h:{size.height}\">{image}</a>");
+    }
+    var html = template.replace(marker, tiles.join("\n"));
+    if (!FileSystem.writeAtomicBytes(f"{root}/index.html", Bytes.fromString(html))) { throw f"Could not write {root}/index.html"; }
+}
+
+int main(Vector<string> args) {
+    try {
+        if (args.isEmpty()) { render("docs", "gallery.html"); }
+        else if (args.length == 2) { render(args.get(0), args.get(1)); }
+        else { throw "Usage: gallery [site-directory template]"; }
+        return 0;
+    } catch (string error) {
+        Console.error(error);
+        return 1;
+    }
+}

@@ -1,0 +1,22 @@
+import Library.FileSystem;
+import Library.Image.JPEG;
+
+class Photographs {
+    class Vector<string> names(string path) {
+        var directory = Directory(path);
+        var entries = directory.entries();
+        if (directory.failed()) { throw f"Could not list {path}"; }
+        Vector<string> names = [];
+        for name in entries {
+            var lower = name.toLower();
+            if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) { names.push(name); }
+        }
+        names.sort();
+        return names;
+    }
+
+    class JPEGHeader header(string path) {
+        try { return JPEGHeader.inspect(FileSystem.readBytes(path)); }
+        catch (string error) { throw f"{path}: {error}"; }
+    }
+}
