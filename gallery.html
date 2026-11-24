@@ -14,6 +14,7 @@
   <meta name="msapplication-config" content="img/favicon/browserconfig.xml">
   <meta name="theme-color" content="#ffffff">
   <link rel="stylesheet" href="css/style.css">
+  <script defer src="js/grid.js"></script>
   <script defer src="js/lightbox.js"></script>
 </head>
 <body>
@@ -26,6 +27,8 @@
   </main>
   <dialog aria-label="Photo viewer">
     <div class="stage">
+      <img class="neighbor previous" alt="" draggable="false">
+      <img class="neighbor next" alt="" draggable="false">
       <div class="frame"></div>
       <div class="minimap" hidden title="Drag to pan">
         <img alt="" draggable="false">

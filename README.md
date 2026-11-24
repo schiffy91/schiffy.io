@@ -14,4 +14,6 @@ To make smaller gallery images, run `nix run .#previews` before regenerating. BT
 
 The gallery shuffles once per visit. Photos wrap from left to right in justified rows. The arrow buttons and arrow keys follow that order and wrap at either end.
 
-Scroll over the open photo to zoom at the pointer. Drag the photo to pan, or use the minimap to jump to a spot and drag the outlined area. The zoom buttons also work on touchscreens. On a keyboard, use `+` and `-` to zoom, Shift with an arrow key to pan, `0` to fit, and Escape to close.
+Drag left or right to browse. A zoomed photo pans first, then reveals its neighbor at the edge. Pinch with two or more fingers, scroll over the photo, or use the zoom buttons. Double-tap or double-click to fit. The minimap shows the visible area and lets you move it.
+
+Pull down past the top edge or pinch smaller than fit to return to the current photo in the grid. On a keyboard, use `+` and `-` to zoom, Shift with an arrow key to pan, `0` to fit, and Escape to close.
