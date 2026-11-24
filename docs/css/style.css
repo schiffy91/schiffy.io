@@ -52,8 +52,7 @@ dialog {
 }
 dialog::backdrop { background: transparent; }
 .gallery .in-viewer { opacity: 0; }
-dialog[open] { display: grid; grid-template-rows: minmax(0, 1fr) auto; }
-.stage { overflow: hidden; position: relative; touch-action: none; user-select: none; }
+.stage { position: absolute; inset: 0; overflow: hidden; touch-action: none; user-select: none; }
 dialog.returning .stage { overflow: visible; }
 dialog.returning .neighbor { visibility: hidden; }
 .neighbor { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
@@ -62,8 +61,8 @@ dialog.returning .neighbor { visibility: hidden; }
 .stage.zoomed .frame:active { cursor: grabbing; }
 .minimap {
   position: absolute;
-  bottom: 12px;
-  right: 12px;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  right: max(12px, env(safe-area-inset-right));
   width: min(9rem, 28vw, calc(6rem * var(--ratio)));
   aspect-ratio: var(--ratio);
   overflow: hidden;
@@ -77,30 +76,5 @@ dialog.returning .neighbor { visibility: hidden; }
   box-shadow: 0 0 0 250px #0008;
   pointer-events: none;
 }
-.controls {
-  opacity: var(--shade);
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 4px max(6px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(6px, env(safe-area-inset-left));
-  background: #191919;
-  font-variant-numeric: tabular-nums;
-}
-.controls button {
-  min-width: 40px;
-  min-height: 44px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: 21px;
-  cursor: pointer;
-}
-.controls button:hover, .controls button:focus-visible { background: #363636; }
-.controls button:disabled { opacity: .35; cursor: default; }
-#fit { min-width: 48px; font-size: 14px; }
-#counter { text-align: center; }
-.spacer { flex: 1; }
-#notice { position: absolute; bottom: 54px; left: 8px; margin: 0; background: #191919; }
+#notice { position: absolute; bottom: max(8px, env(safe-area-inset-bottom)); left: max(8px, env(safe-area-inset-left)); margin: 0; background: #191919; }
 #notice:not(:empty) { padding: 6px 10px; }

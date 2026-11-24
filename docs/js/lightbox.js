@@ -5,10 +5,6 @@ const previous = stage.querySelector(".previous");
 const next = stage.querySelector(".next");
 const map = stage.querySelector(".minimap");
 const bounds = map.querySelector("span");
-const fit = dialog.querySelector("#fit");
-const smaller = dialog.querySelector("#smaller");
-const larger = dialog.querySelector("#larger");
-const counter = dialog.querySelector("#counter");
 const notice = dialog.querySelector("#notice");
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
@@ -45,9 +41,6 @@ function draw() {
   bounds.style.width = (clamp(left + w / width, 0, 1) - clamp(left, 0, 1)) * 100 + "%";
   bounds.style.height = (clamp(top + h / height, 0, 1) - clamp(top, 0, 1)) * 100 + "%";
   stage.classList.toggle("zoomed", zoom > 1);
-  fit.textContent = Math.round(zoom * 100) + "%";
-  smaller.disabled = zoom <= 1;
-  larger.disabled = zoom >= 8;
 }
 
 // Only releases animate. A new press picks up the last rendered position.
@@ -104,7 +97,6 @@ async function show(position) {
   ratio = Number(thumbnail.getAttribute("width")) / Number(thumbnail.getAttribute("height"));
   map.style.setProperty("--ratio", ratio);
   map.querySelector("img").src = preview.src;
-  counter.textContent = `${index + 1} / ${photoGrid.tiles.length}`;
   notice.textContent = "";
   Object.assign(view, fitted);
   if (!dialog.open) dialog.showModal();
@@ -260,13 +252,9 @@ stage.onwheel = event => {
   zoomTo(view.zoom * Math.exp(-event.deltaY * unit * .002), { x: event.clientX - rect.left - rect.width / 2, y: event.clientY - rect.top - rect.height / 2 });
 };
 photoGrid.onOpen(show);
-dialog.querySelector("#previous").onclick = () => show(index - 1);
-dialog.querySelector("#next").onclick = () => show(index + 1);
-dialog.querySelector("#close").onclick = dismiss;
-fit.onclick = () => { if (!closing && !pointers.size) settle(fitted); };
-stage.ondblclick = () => { if (gesture?.tap && !gesture.onMap) fit.onclick(); };
-smaller.onclick = () => zoomTo(view.zoom / 1.5);
-larger.onclick = () => zoomTo(view.zoom * 1.5);
+stage.ondblclick = () => {
+  if (!closing && !pointers.size && gesture?.tap && !gesture.onMap) settle(fitted);
+};
 dialog.oncancel = event => { event.preventDefault(); dismiss(); };
 dialog.onclose = () => {
   if (dialog.open) return;
@@ -284,10 +272,15 @@ dialog.onkeydown = event => {
     view.y += ({ ArrowUp: h / 5, ArrowDown: -h / 5 })[event.key] || 0;
     zoomTo(view.zoom);
   } else {
-    const actions = { ArrowLeft: () => show(index - 1), ArrowRight: () => show(index + 1),
-      "+": larger.onclick, "=": larger.onclick, "-": smaller.onclick, "0": fit.onclick };
-    if (!Object.hasOwn(actions, event.key)) return;
-    actions[event.key]();
+    switch (event.key) {
+      case "ArrowLeft": show(index - 1); break;
+      case "ArrowRight": show(index + 1); break;
+      case "+":
+      case "=": zoomTo(view.zoom * 1.5); break;
+      case "-": zoomTo(view.zoom / 1.5); break;
+      case "0": settle(fitted); break;
+      default: return;
+    }
   }
   event.preventDefault();
 };

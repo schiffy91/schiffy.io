@@ -25,7 +25,7 @@
   <main class="gallery" aria-label="Photography">
 <!-- photos -->
   </main>
-  <dialog aria-label="Photo viewer">
+  <dialog aria-label="Photo viewer" autofocus>
     <div class="stage">
       <img class="neighbor previous" alt="" draggable="false">
       <img class="neighbor next" alt="" draggable="false">
@@ -34,16 +34,6 @@
         <img alt="" draggable="false">
         <span></span>
       </div>
-    </div>
-    <div class="controls">
-      <button id="previous" aria-label="Previous photograph" title="Previous (←)">←</button>
-      <span id="counter" aria-live="polite"></span>
-      <button id="next" aria-label="Next photograph" title="Next (→)">→</button>
-      <span class="spacer"></span>
-      <button id="smaller" aria-label="Zoom out" title="Zoom out (−)">−</button>
-      <button id="fit" aria-label="Fit photograph to screen" title="Fit to screen (0)">100%</button>
-      <button id="larger" aria-label="Zoom in" title="Zoom in (+)">+</button>
-      <button id="close" aria-label="Close viewer" title="Close (Esc)" autofocus>×</button>
     </div>
     <p id="notice" role="status"></p>
   </dialog>

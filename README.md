@@ -12,8 +12,8 @@ To make smaller gallery images, run `nix run .#previews` before regenerating. BT
 
 ## Gallery controls
 
-The gallery shuffles once per visit. Photos wrap from left to right in justified rows. The arrow buttons and arrow keys follow that order and wrap at either end.
+The gallery shuffles once per visit. Photos wrap from left to right in justified rows. The arrow keys follow that order and wrap at either end.
 
-Drag left or right to browse. A zoomed photo pans first, then reveals its neighbor at the edge. Pinch with two or more fingers, scroll over the photo, or use the zoom buttons. Double-tap or double-click to fit. The minimap shows the visible area and lets you move it.
+Drag left or right to browse. A zoomed photo pans first, then reveals its neighbor at the edge. Pinch with two or more fingers or scroll over the photo to zoom. Double-tap or double-click to fit. The minimap shows the visible area and lets you move it.
 
 Pull down past the top edge or pinch smaller than fit to return to the current photo in the grid. On a keyboard, use `+` and `-` to zoom, Shift with an arrow key to pan, `0` to fit, and Escape to close.
