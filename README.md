@@ -14,6 +14,8 @@ To make smaller gallery images, run `nix run .#previews` before regenerating. BT
 
 The gallery shuffles once per visit. Photos wrap from left to right in justified rows. The arrow keys follow that order and wrap at either end.
 
-Drag left or right to browse. A zoomed photo pans first, then reveals its neighbor at the edge. Pinch with two or more fingers or scroll over the photo to zoom. Double-tap or double-click to fit. The minimap shows the visible area and lets you move it.
+Drag left or right, or drag with two fingers on a trackpad, to browse. A zoomed photo pans first, then reveals its neighbor at the edge. Pinch with two or more fingers, pinch on a trackpad, or hold Ctrl or Command while scrolling to zoom. Double-tap or double-click to fit. The minimap shows the visible area and lets you move it.
 
 Pull down past the top edge or pinch smaller than fit to return to the current photo in the grid. On a keyboard, use `+` and `-` to zoom, Shift with an arrow key to pan, `0` to fit, and Escape to close.
+
+Append `?debug` to the URL (or call `lightbox.debug()` in DevTools) to load the modular state-graph debugger (`docs/js/lightbox-debug.js`) and tune gesture parameters live. Run `node --test tests/lightbox.test.mjs` for unit tests and `node tests/lightbox.test.mjs --bench` for hot-path benchmarks.

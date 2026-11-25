@@ -27,12 +27,18 @@
   </main>
   <dialog aria-label="Photo viewer" autofocus>
     <div class="stage">
-      <img class="neighbor previous" alt="" draggable="false">
-      <img class="neighbor next" alt="" draggable="false">
-      <div class="frame"></div>
-      <div class="minimap" hidden title="Drag to pan">
-        <img alt="" draggable="false">
-        <span></span>
+      <div class="track">
+        <div class="track-space">
+          <div class="viewport">
+            <div class="frame"></div>
+            <div class="frame"></div>
+            <div class="frame"></div>
+            <div class="minimap" hidden title="Drag to pan">
+              <img alt="" draggable="false">
+              <span></span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
     <p id="notice" role="status"></p>

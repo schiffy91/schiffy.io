@@ -5,6 +5,7 @@
 }
 
 * { box-sizing: border-box; }
+html { scrollbar-gutter: stable; }
 body { margin: 8px; background: whitesmoke; color: #181818; }
 header { display: flex; align-items: center; justify-content: space-between; margin: 24px 0; }
 h1 { margin: 0; font: normal 40px/1 Barcode, monospace; }
@@ -31,8 +32,7 @@ header img { height: 40px; max-width: 50%; object-fit: contain; }
 .gallery a:focus-visible { outline: 3px solid #0067bb; outline-offset: 1px; }
 @media (hover: hover) { .gallery a:hover img { filter: brightness(.86); } }
 
-html { scrollbar-gutter: stable; }
-html:has(dialog[open]) { overflow: hidden; }
+html:has(dialog[open]) { overflow: hidden; overscroll-behavior: none; }
 dialog {
   position: fixed;
   inset: 0;
@@ -52,13 +52,28 @@ dialog {
 }
 dialog::backdrop { background: transparent; }
 .gallery .in-viewer { opacity: 0; }
-.stage { position: absolute; inset: 0; overflow: hidden; touch-action: none; user-select: none; }
-dialog.returning .stage { overflow: visible; }
-dialog.returning .neighbor { visibility: hidden; }
-.neighbor { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
-.frame { position: absolute; inset: 0 auto auto 0; }
-.stage.zoomed .frame { cursor: grab; }
-.stage.zoomed .frame:active { cursor: grabbing; }
+.stage { position: absolute; inset: 0; overflow: hidden; touch-action: none; overscroll-behavior: none; user-select: none; }
+.track {
+  position: absolute;
+  inset: 0;
+  overflow: scroll;
+  overscroll-behavior: none;
+  touch-action: none;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+}
+.track.snap-both { scroll-snap-type: both mandatory; }
+.track.free { scroll-snap-type: none; }
+.track::-webkit-scrollbar { display: none; }
+.track-space { position: relative; }
+.snap { position: absolute; pointer-events: none; scroll-snap-align: start; scroll-snap-stop: always; }
+.track.snap-both .snap { scroll-snap-align: start start; }
+.viewport { position: sticky; top: 0; left: 0; width: var(--w, 100%); height: var(--h, 100%); overflow: hidden; contain: layout style; }
+.frame { position: absolute; inset: 0 auto auto 0; transform-origin: 0 0; will-change: transform; contain: layout style; }
+.frame:not(.current) { pointer-events: none; }
+.frame img { position: absolute; inset: 0; }
+.stage.zoomed .frame.current { cursor: grab; }
+.stage.zoomed .frame.current:active { cursor: grabbing; }
 .minimap {
   position: absolute;
   bottom: max(12px, env(safe-area-inset-bottom));
@@ -69,6 +84,7 @@ dialog.returning .neighbor { visibility: hidden; }
   outline: 1px solid #999;
   background: #181818;
   cursor: crosshair;
+  contain: layout paint style;
 }
 .minimap span {
   position: absolute;
