@@ -258,7 +258,7 @@ body { padding-top: var(--lb-debug-h, 0px); }
       toggleBtn.textContent = collapsed ? "Graph" : "Hide";
       syncHeight();
     });
-    closeBtn.addEventListener("click", unmount);
+    closeBtn.addEventListener("click", event => { event.stopPropagation(); unmount(); });
 
     renderState(lb.state, lb.lastEdge);
     syncHeight();

@@ -9,7 +9,7 @@ const lightbox = (() => {
   const track = stage.querySelector(".track");
   const trackSpace = track.querySelector(".track-space");
   const viewport = trackSpace.querySelector(".viewport");
-  const [snapPrev, snapCurr, snapNext, snapPull] = Array.from({ length: 4 }, () => {
+  const [snapPrev, snapCurr, snapNext] = Array.from({ length: 3 }, () => {
     const el = document.createElement("div");
     el.className = "snap";
     el.setAttribute("aria-hidden", "true");
@@ -74,7 +74,7 @@ const lightbox = (() => {
         allowFrom: ["viewing", "paging", "pulling"],
         vars: {
           swipeSpeed: numVar("speed", 2.0, .5, 4, .1, v => v.toFixed(1) + "x"),
-          snapAxis:   optVar("snap", "x", [["x", "X"], ["both", "X+Y"], ["none", "off"]]),
+          snapAxis:   optVar("snap", "both", [["both", "X+Y"], ["x", "X"], ["none", "off"]]),
         },
       },
       {
@@ -548,6 +548,7 @@ const lightbox = (() => {
     if (input.absorbUntil) input.lastAbsorbed = performance.now();
     pending = input.trackMeta = input.axis = null;
     input.scrolled = false;
+    input.lastWheel = 0;
     stageBox.w = stageBox.h = 0;
     stageBox.cursor = stageBox.tileAnchor = null;
     cache.synced = -1;
@@ -726,16 +727,11 @@ const lightbox = (() => {
       trackSpace.style.height = (pullSpace + h + limitY * 2) + "px";
       snapPrev.hidden = snapNext.hidden = !hasNeighbors || free;
       snapCurr.hidden = free;
-      snapPull.hidden = !both;
       if (!free) {
-        const y = both ? pullSpace : 0, sh = both ? h + "px" : "100%";
-        for (const [el, x, sw] of [[snapPrev, 0, padX], [snapCurr, padX, padX], [snapNext, padX * 2, w]]) {
+        const y = both ? pullSpace : 0, sh = both ? h + "px" : "100%", cw = padX || w;
+        for (const [el, x, sw] of [[snapPrev, 0, padX], [snapCurr, padX, cw], [snapNext, padX * 2, w]]) {
           el.style.left = x + "px"; el.style.top = y + "px";
           el.style.width = sw + "px"; el.style.height = sh;
-        }
-        if (both) {
-          snapPull.style.left = padX + "px"; snapPull.style.top = "0px";
-          snapPull.style.width = padX + "px"; snapPull.style.height = pullSpace + "px";
         }
       }
     }
@@ -746,6 +742,7 @@ const lightbox = (() => {
     input.trackMeta = {
       w, h, limitX, limitY, padX, pullSpan, pullSpace, hasNeighbors, free, both, swipeSpeed, pullSpeed,
       originX, originY, left: track.scrollLeft, top: track.scrollTop,
+      lastSl: track.scrollLeft, lastSt: track.scrollTop, snapFrames: 0, wheelPull: 0,
     };
     input.axis = null;
     input.scrolled = false;
@@ -755,9 +752,12 @@ const lightbox = (() => {
   function onTrackScroll() {
     const meta = input.trackMeta;
     if (!dialog.open || !isOpen() || input.pointers.size || input.pinch || input.wheelPinching || !meta) return;
-    const { w, limitX, limitY, originX, originY, pullSpan, hasNeighbors, swipeSpeed, pullSpeed, left, top } = meta;
+    const { w, limitX, limitY, padX, originX, originY, pullSpan, hasNeighbors, free, both, swipeSpeed, pullSpeed, left, top } = meta;
     const sl = track.scrollLeft, st = track.scrollTop;
     if (!input.scrolled && Math.abs(sl - left) < 1 && Math.abs(st - top) < 1) return;
+    const prevSl = meta.lastSl, prevSt = meta.lastSt;
+    meta.lastSl = sl;
+    meta.lastSt = st;
     input.scrolled = true;
     cancelAnimationFrame(animation);
     const dx = originX - sl, dy = originY - st;
@@ -776,6 +776,8 @@ const lightbox = (() => {
     view.x = x; view.y = y;
     view.page = axis === "x" ? rawPage : 0;
     view.pull = axis === "y" ? rawPull : 0;
+    const now = performance.now();
+    if (now - input.lastWheel < 45) meta.wheelPull = view.pull;
     if (view.zoom <= 1) {
       if (view.page && state !== "paging") transition("swipe");
       else if (view.pull && state !== "pulling") transition("pull");
@@ -784,10 +786,44 @@ const lightbox = (() => {
     if (axis === "y" && view.zoom <= 1 && (st <= 1 || rawPull >= pullSpan - 1)) {
       input.scrolled = false;
       input.axis = null;
-      const now = performance.now();
       input.absorbUntil = now + 1800;
       input.lastAbsorbed = now;
       return void transition("dismiss");
+    }
+    // Native CSS scroll-snap animates after fingers lift with zero wheel events and can take ~1s
+    // on gentle bounces. Once 2 consecutive scroll frames arrive with no wheel input for >= 45ms,
+    // abort native snap and finish via JS settle/bounce/dismiss using the edge's max/min/curve/ease.
+    const snapAxisActive = axis === "x" ? !free : both;
+    if (snapAxisActive && view.zoom <= 1 && input.lastWheel > 0 && now - input.lastWheel >= 45) {
+      const dist = axis === "x" ? Math.abs(sl - originX) : Math.max(0, originY - st);
+      const prevDist = axis === "x" ? Math.abs(prevSl - originX) : Math.max(0, originY - prevSt);
+      const towardCenter = dist < prevDist;
+      const towardEdge = axis === "x" ? (dist > prevDist && dist > padX * .5) : (dist > prevDist);
+      if (towardCenter || towardEdge) {
+        if (++meta.snapFrames >= 2) {
+          track.style.scrollSnapType = "none";
+          track.scrollLeft = originX;
+          track.scrollTop = originY;
+          void track.scrollLeft;
+          track.style.scrollSnapType = "";
+          meta.left = meta.lastSl = track.scrollLeft;
+          meta.top = meta.lastSt = track.scrollTop;
+          meta.snapFrames = 0;
+          input.scrolled = false;
+          input.axis = null;
+          if (axis === "y") {
+            if (pullScaleFor(meta.wheelPull, pullSpan) < params.dismissScale) return void transition("dismiss");
+            return void transition("bounce", { target: withinPhoto() });
+          }
+          if (towardCenter) return void transition("settle", { target: withinPhoto() });
+          const dir = Math.sign(view.page);
+          if (dir) return void transition("settle", { step: -dir, target: { page: dir * w, pull: 0 } });
+        }
+      } else if (dist !== prevDist) {
+        meta.snapFrames = 0;
+      }
+    } else {
+      meta.snapFrames = 0;
     }
     if (!hasScrollEnd) {
       clearTimeout(input.scrollTimer);
@@ -804,7 +840,8 @@ const lightbox = (() => {
     input.scrolled = false;
     input.axis = null;
     if (axis === "y") {
-      if ((both && st <= 2) || pullScaleFor(view.pull, pullSpan) < params.dismissScale) return transition("dismiss");
+      const releasePull = input.lastWheel > 0 ? meta.wheelPull : view.pull;
+      if (pullScaleFor(releasePull, pullSpan) < params.dismissScale) return transition("dismiss");
       if (!free && hasNeighbors && sl >= padX * 2 - 2) return transition("settle", { step: 1, immediate: true });
       if (!free && hasNeighbors && sl <= 2) return transition("settle", { step: -1, immediate: true });
       return transition("bounce", { target: withinPhoto() });

@@ -136,6 +136,7 @@ function createHarness({ w = 1440, h = 900, tileCount = 10, loadDebug = false } 
       dispatch(type, ev = {}) {
         ev.cancelable ??= true;
         ev.preventDefault = () => { if (!ev.cancelable) stats.interventions++; else ev.defaultPrevented = true; };
+        ev.stopPropagation ??= () => {};
         ev.timeStamp ??= now;
         ev.target ??= el;
         for (const fn of (ls.get(type) || [])) fn(ev);
@@ -432,28 +433,28 @@ test("dismiss duration scales linearly from dismissMaxMs at dismissScale down pr
   assert.equal(b.dialog.open, false, "Closes in half the time when released 50% smaller");
 });
 
-test("snap modes (x, both, none) and live config updates resize track cleanly without overlapping snap areas", () => {
+test("snap modes (both, x, none) and live config updates resize track cleanly without overlapping snap areas", () => {
   const e = createHarness({ w: 1200, h: 800 });
   e.open(0);
   e.advance(32);
-  // Default mode: 1D horizontal snap ("x") with 3 contiguous non-overlapping snap regions
-  assert.equal(e.lightbox.config.snapAxis, "x");
+  // Default mode: 2D X+Y snap ("both") with 3 contiguous non-overlapping snap slots at y = pullSpace
+  // (no y=0 snapPull target, so small downward nudges never snap into dismiss).
+  assert.equal(e.lightbox.config.snapAxis, "both");
   assert.equal(e.track.classList.contains("free"), false);
-  assert.equal(e.track.classList.contains("snap-both"), false);
+  assert.equal(e.track.classList.contains("snap-both"), true);
   const snaps = e.trackSpace.querySelectorAll(".snap");
-  assert.equal(snaps.length, 4);
-  assert.equal(snaps[3].hidden, true, "snapPull hidden in 1D x-only snap mode");
-  // Contiguous non-overlapping: snapPrev [0..600], snapCurr [600..1200], snapNext [1200..2400]
+  assert.equal(snaps.length, 3);
   assert.equal(parseFloat(snaps[0].style.left), 0);
   assert.equal(parseFloat(snaps[0].style.width), 600);
   assert.equal(parseFloat(snaps[1].style.left), 600);
   assert.equal(parseFloat(snaps[1].style.width), 600);
   assert.equal(parseFloat(snaps[2].style.left), 1200);
+  assert.ok(parseFloat(snaps[1].style.top) > 0, "snap slots sit at y = pullSpace in X+Y mode");
 
-  // Switch live to "both" and "none"
-  e.lightbox.setConfig({ snapAxis: "both", swipeSpeed: 1.5 });
-  assert.equal(e.track.classList.contains("snap-both"), true);
-  assert.equal(snaps[3].hidden, false);
+  // Switch live to "x" and "none"
+  e.lightbox.setConfig({ snapAxis: "x", swipeSpeed: 1.5 });
+  assert.equal(e.track.classList.contains("snap-both"), false);
+  assert.equal(parseFloat(snaps[1].style.top), 0);
   assert.equal(parseFloat(snaps[1].style.left), 800);
 
   e.lightbox.setConfig({ snapAxis: "none" });
@@ -679,6 +680,61 @@ test("hitting min shrink size kills trackpad momentum immediately, absorbs resid
   assert.equal(floor.dialog.open, true, "Honors dismissMinMs=180ms floor at min shrink size");
   floor.advance(120);
   assert.equal(floor.dialog.open, false);
+});
+
+test("wheel-less native scroll-snap takeover makes gentle Y and X bounces fast without false-triggering slow finger drags", () => {
+  // 1) Gentle swipe down to ~84% (above 78% threshold) then release -> native CSS snap starts returning without wheel events
+  const yBounce = createHarness({ w: 1200, h: 800 });
+  yBounce.open(0);
+  yBounce.advance(32);
+  const originY = yBounce.track.scrollTop;
+  // Slow human finger drag (100ms between ticks) must NEVER false-trigger while wheel accompanies scroll
+  for (let i = 0; i < 4; i++) {
+    yBounce.wheelTick(0, -15, { cancelable: i === 0 });
+    yBounce.advance(100);
+  }
+  assert.equal(yBounce.lightbox.state, "pulling", "Slow human drag stays in pulling");
+  // Fingers lift -> native CSS scroll-snap moves scrollTop back toward originY with ZERO wheel events
+  yBounce.track.scrollTop += 3;
+  yBounce.track.dispatch("scroll");
+  yBounce.stepFrame(16);
+  yBounce.track.scrollTop += 4;
+  yBounce.track.dispatch("scroll");
+  assert.equal(yBounce.lightbox.state, "viewing", "Took over slow native Y bounce into fast JS bounce");
+  assert.equal(yBounce.lightbox.lastEdge, "bounce");
+  yBounce.advance(150);
+  assert.equal(yBounce.dialog.open, true);
+  assert.equal(yBounce.lightbox.telemetry.scale, 1, "Bounce finishes rapidly (~70-100ms)");
+
+  // 2) Gentle swipe down to ~68% (past 78% dismissScale, above 57.5% snap midpoint) -> snap-back triggers dismiss using wheelPull
+  const yDismiss = createHarness({ w: 1200, h: 800 });
+  yDismiss.open(0);
+  yDismiss.advance(32);
+  yDismiss.wheelTick(0, -130, { cancelable: true }); // ~68% scale
+  yDismiss.advance(64);
+  yDismiss.track.scrollTop += 4;
+  yDismiss.track.dispatch("scroll");
+  yDismiss.stepFrame(16);
+  yDismiss.track.scrollTop += 4;
+  yDismiss.track.dispatch("scroll");
+  assert.equal(yDismiss.lightbox.state, "closing", "Wheel-less Y snap takeover dismisses when wheelPull crossed close@");
+
+  // 3) Gentle horizontal swipe (~35%) then release -> wheel-less CSS snap hands off to fast JS settle
+  const xBounce = createHarness({ w: 1200, h: 800 });
+  xBounce.open(0);
+  xBounce.advance(32);
+  xBounce.wheelTick(210, 0, { cancelable: true });
+  assert.equal(xBounce.lightbox.state, "paging");
+  xBounce.advance(64);
+  xBounce.track.scrollLeft -= 5;
+  xBounce.track.dispatch("scroll");
+  xBounce.stepFrame(16);
+  xBounce.track.scrollLeft -= 5;
+  xBounce.track.dispatch("scroll");
+  assert.equal(xBounce.lightbox.state, "viewing", "Took over slow native X bounce into fast JS settle");
+  assert.equal(xBounce.lightbox.lastEdge, "settle");
+  xBounce.advance(200);
+  assert.equal(Math.abs(xBounce.lightbox.telemetry.page), 0);
 });
 
 test("modular lightbox-debug mounts cleanly, highlights active state/edge, reparents without close flicker, and unmounts completely", () => {
