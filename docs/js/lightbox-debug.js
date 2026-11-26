@@ -54,6 +54,7 @@ body { padding-top: var(--lb-debug-h, 0px); }
   border: 1px solid #3a4352; border-radius: 4px; padding: 1px 6px; cursor: pointer;
 }
 .lb-debug button:hover { background: #2f3846; }
+.lb-debug button.rec-on { background: #5c1f24; border-color: #d9534f; color: #ffd7d5; }
 .lb-debug-scroll { overflow-x: auto; overflow-y: hidden; }
 .sm-board { position: relative; margin: 0 auto; }
 .sm-svg { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
@@ -123,6 +124,9 @@ body { padding-top: var(--lb-debug-h, 0px); }
     const badge = el("span", "lb-debug-state", lb.state);
     const edgeBadge = el("span", "lb-debug-last", "");
     const live = el("span", "lb-debug-live", "");
+    const recBtn = el("button", "", "Rec");
+    recBtn.type = "button";
+    recBtn.title = "Record trackpad, pointer, and keyboard trace as JSON";
     const resetBtn = el("button", "", "Reset");
     resetBtn.type = "button";
     const toggleBtn = el("button", "", "Hide");
@@ -130,7 +134,7 @@ body { padding-top: var(--lb-debug-h, 0px); }
     const closeBtn = el("button", "", "×");
     closeBtn.type = "button";
     closeBtn.setAttribute("aria-label", "Close debug graph");
-    head.append(el("strong", "lb-debug-title", "State Graph"), badge, edgeBadge, live, resetBtn, toggleBtn, closeBtn);
+    head.append(el("strong", "lb-debug-title", "State Graph"), badge, edgeBadge, live, recBtn, resetBtn, toggleBtn, closeBtn);
     panel.append(head);
 
     const scrollWrap = el("div", "lb-debug-scroll");
@@ -244,6 +248,127 @@ body { padding-top: var(--lb-debug-h, 0px); }
       for (const [id, bar] of edgeBars) bar.classList.toggle("active", id === activeEdge);
     }
 
+    let recording = false, recStart = 0, recEvents = [], recOff = [], recStage = null;
+    const round2 = n => Math.round(n * 100) / 100;
+    const snapContext = (clientX, clientY) => {
+      const dlg = document.querySelector("dialog");
+      const stg = dlg?.querySelector(".stage");
+      const tr = dlg?.querySelector(".track");
+      const ts = dlg?.querySelector(".track-space");
+      const cur = dlg?.querySelector(".frame.current");
+      const mp = dlg?.querySelector(".minimap");
+      const sr = stg?.getBoundingClientRect?.();
+      if (sr?.width && sr?.height) recStage = [Math.round(sr.width), Math.round(sr.height)];
+      const cr = cur?.getBoundingClientRect?.();
+      const mr = mp && !mp.hidden ? mp.getBoundingClientRect?.() : null;
+      const w = sr?.width || window.innerWidth || 1, h = sr?.height || window.innerHeight || 1;
+      const img = cur?.firstElementChild;
+      const aspect = cr && cr.height ? cr.width / cr.height : 1;
+      const orient = aspect > 1.05 ? "landscape" : aspect < 0.95 ? "portrait" : "square";
+      let hit = null, photoUV = null, stageUV = null;
+      if (typeof clientX === "number" && typeof clientY === "number" && sr) {
+        const left = sr.width ? sr.left : 0, top = sr.height ? sr.top : 0;
+        stageUV = [round2((clientX - left) / w), round2((clientY - top) / h)];
+        if (panel.contains?.(document.elementFromPoint?.(clientX, clientY))) hit = "debug";
+        else if (mr && clientX >= mr.left && clientX <= mr.right && clientY >= mr.top && clientY <= mr.bottom) hit = "minimap";
+        else if (cr && clientX >= cr.left && clientX <= cr.right && clientY >= cr.top && clientY <= cr.bottom) {
+          hit = "photo";
+          photoUV = [round2((clientX - cr.left) / (cr.width || 1)), round2((clientY - cr.top) / (cr.height || 1))];
+        } else hit = "backdrop";
+      }
+      const maxX = Math.max(1, (parseFloat(ts?.style?.width || 0) - w) / 2);
+      const maxY = Math.max(1, parseFloat(ts?.style?.height || 0) - h);
+      const sl = tr ? Math.round(tr.scrollLeft) : 0;
+      const st = tr ? Math.round(tr.scrollTop) : 0;
+      return {
+        open: Boolean(dlg?.open),
+        state: lb.state,
+        edge: lb.lastEdge,
+        scale: round2(lb.telemetry.scale),
+        page: Math.round(lb.telemetry.page),
+        alt: img?.alt || "",
+        orient,
+        aspect: round2(aspect),
+        sl, st,
+        slNorm: round2((sl - maxX) / maxX),
+        stNorm: round2((maxY - st) / maxY),
+        scrollY: Math.round(window.scrollY || 0),
+        ...(hit ? { hit, stageUV, ...(photoUV ? { photoUV } : {}) } : {}),
+      };
+    };
+
+    function stopRecording(copy = true) {
+      if (!recording) return;
+      recording = false;
+      for (const off of recOff) off();
+      recOff = [];
+      recBtn.classList.remove("rec-on");
+      const stg = document.querySelector(".stage")?.getBoundingClientRect?.();
+      const payload = {
+        version: 1,
+        recordedAt: new Date().toISOString(),
+        viewport: recStage || [Math.round(stg?.width || window.innerWidth || 0), Math.round(stg?.height || window.innerHeight || 0)],
+        config: { ...lb.config },
+        events: recEvents,
+      };
+      if (typeof window !== "undefined") window.__lbTrace = payload;
+      const json = JSON.stringify(payload);
+      try { localStorage.setItem("schiffy-lb-trace", json); } catch {}
+      if (copy) {
+        try { navigator?.clipboard?.writeText?.(json)?.catch?.(() => {}); } catch {}
+        console.info(`[lb-trace] ${recEvents.length} events saved to window.__lbTrace & clipboard`, payload);
+        recBtn.textContent = `Copied (${recEvents.length})`;
+        setTimeout(() => { if (!recording) recBtn.textContent = "Rec"; }, 2200);
+      } else {
+        recBtn.textContent = "Rec";
+      }
+    }
+
+    function startRecording() {
+      recording = true;
+      recStart = performance.now();
+      recStage = null;
+      recEvents = [{ t: 0, type: "start", ...snapContext() }];
+      recBtn.classList.add("rec-on");
+      recBtn.textContent = "Stop (0)";
+      const push = (type, extra = {}, cx, cy) => {
+        if (!recording || recEvents.length >= 2000) return;
+        recEvents.push({ t: Math.round(performance.now() - recStart), type, ...extra, ...snapContext(cx, cy) });
+        if (recEvents.length % 5 === 0) recBtn.textContent = `Stop (${recEvents.length})`;
+      };
+      const listen = (target, type, fn, opts) => {
+        target?.addEventListener?.(type, fn, opts);
+        recOff.push(() => target?.removeEventListener?.(type, fn, opts));
+      };
+      const tr = document.querySelector(".track");
+      listen(window, "wheel", e => push("wheel", {
+        dx: round2(e.deltaX), dy: round2(e.deltaY), ctrl: e.ctrlKey, meta: e.metaKey, cancelable: e.cancelable,
+        ...(typeof e.momentum === "boolean" ? { momentum: e.momentum } : {}),
+      }, e.clientX, e.clientY), { capture: true, passive: true });
+      listen(tr, "scroll", () => push("scroll"), { passive: true });
+      listen(tr, "scrollend", () => push("scrollend"), { passive: true });
+      for (const pt of ["pointerdown", "pointermove", "pointerup", "pointercancel"]) {
+        listen(window, pt, e => {
+          if (panel.contains?.(e.target)) return;
+          if (pt === "pointermove" && !document.querySelector("dialog")?.open && !e.buttons) return;
+          push(pt, { id: e.pointerId, btn: e.button }, e.clientX, e.clientY);
+        }, { capture: true, passive: true });
+      }
+      for (const gt of ["gesturestart", "gesturechange", "gestureend"]) {
+        listen(window, gt, e => push(gt, { gScale: round2(e.scale || 1) }, e.clientX, e.clientY), { capture: true, passive: true });
+      }
+      listen(window, "keydown", e => push("keydown", {
+        key: e.key, shift: e.shiftKey, ctrl: e.ctrlKey, meta: e.metaKey, altKey: e.altKey,
+        targetTag: e.target?.tagName || "",
+      }), { capture: true, passive: true });
+      recOff.push(lb.onState((s, edge) => push("state", { nextState: s, nextEdge: edge })));
+    }
+
+    recBtn.addEventListener("click", () => {
+      if (recording) stopRecording(true);
+      else startRecording();
+    });
+
     resetBtn.addEventListener("click", () => {
       lb.resetVars();
       for (const [key, ref] of varInputs) {
@@ -276,6 +401,7 @@ body { padding-top: var(--lb-debug-h, 0px); }
     }, 100);
 
     activeCleanup = () => {
+      stopRecording(false);
       clearInterval(timer);
       ro.disconnect?.();
       offState?.();

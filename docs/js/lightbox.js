@@ -18,7 +18,7 @@ const lightbox = (() => {
   });
   const slides = Array.from(viewport.querySelectorAll(".frame"), element => ({
     element, index: -1, ratio: 1, full: false, loading: -1,
-    w: 0, h: 0, tx: NaN, ty: NaN, scale: NaN, clipped: false,
+    w: 0, h: 0, tx: NaN, ty: NaN, scale: NaN, opacity: 1, clipped: false,
   }));
   const map = viewport.querySelector(".minimap");
   const mapImg = map.querySelector("img");
@@ -36,14 +36,16 @@ const lightbox = (() => {
     pointers: new Map(), gesture: null, lastTap: null, pinch: null,
     pinchTimer: 0, scrollTimer: 0, wheelPinching: false, lastPinch: 0,
     trackMeta: null, axis: null, scrolled: false, lastWheel: 0,
-    absorbUntil: 0, lastAbsorbed: 0,
+    absorbUntil: 0, lastAbsorbed: 0, inertia: null, ignoreSnapUntil: 0,
   };
   const listeners = { state: new Set(), toggle: new Set() };
   const telemetry = { drawUs: 0, scale: 1, page: 0 };
   const warmed = new Set();
 
-  let state = "closed", lastEdge = null, index = 0, pending = null, animation = 0, upgradeTimer = 0;
+  let state = "closed", lastEdge = null, index = 0, pending = null, animation = 0, pageGlide = 0, upgradeTimer = 0;
   const isOpen = () => state !== "closed" && state !== "closing";
+  const stopAnim = () => { cancelAnimationFrame(animation); animation = 0; };
+  const stopPageGlide = () => { cancelAnimationFrame(pageGlide); pageGlide = 0; };
 
   // --- Declarative State Graph (single source of truth for runtime + visualizer) ---
 
@@ -80,7 +82,7 @@ const lightbox = (() => {
       },
       {
         id: "settle", from: "paging", to: "viewing", label: "settle",
-        allowFrom: ["paging", "viewing", "zoomed"],
+        allowFrom: ["paging", "viewing"],
         vars: {
           settleMs:    numVar("max", 350, 80, 600, 10, v => Math.round(v) + "ms"),
           settleMinMs: numVar("min", 70, 20, 250, 10, v => Math.round(v) + "ms"),
@@ -107,7 +109,14 @@ const lightbox = (() => {
         id: "bounce", from: "pulling", to: "viewing", label: "bounce",
         allowFrom: ["pulling", "paging"],
         vars: {},
-        op: ({ target = fitted } = {}) => animateTo(target),
+        op: ({ target = fitted } = {}) => {
+          stopPageGlide();
+          if (input.trackMeta && track.scrollLeft !== input.trackMeta.originX) {
+            track.scrollLeft = input.trackMeta.left = input.trackMeta.lastSl = input.trackMeta.originX;
+            input.ignoreSnapUntil = performance.now() + 260;
+          }
+          animateTo(target);
+        },
       },
       {
         id: "dismiss", from: "pulling", to: "closing", label: "dismiss",
@@ -133,6 +142,7 @@ const lightbox = (() => {
         allowFrom: ["zoomed", "viewing", "pulling"],
         vars: {},
         op: ({ animate = true } = {}) => {
+          resetTrackInput();
           if (animate) return animateTo(fitted);
           Object.assign(view, fitted);
           draw();
@@ -272,7 +282,7 @@ const lightbox = (() => {
     }
   }
 
-  function renderSlide(slide, width, height, tx, ty, scale = 1) {
+  function renderSlide(slide, width, height, tx, ty, scale = 1, opacity = 1) {
     const s = slide.element.style;
     if (slide.w !== width || slide.h !== height) {
       slide.w = width; slide.h = height;
@@ -281,6 +291,10 @@ const lightbox = (() => {
     if (slide.clipped) {
       slide.clipped = false;
       s.overflow = s.borderRadius = "";
+    }
+    if (slide.opacity !== opacity) {
+      slide.opacity = opacity;
+      s.opacity = opacity === 1 ? "" : String(opacity);
     }
     if (slide.tx !== tx || slide.ty !== ty || slide.scale !== scale) {
       slide.tx = tx; slide.ty = ty; slide.scale = scale;
@@ -303,8 +317,9 @@ const lightbox = (() => {
 
     const leftW = Math.min(w, h * slides[0].ratio), leftH = leftW / slides[0].ratio;
     const rightW = Math.min(w, h * slides[2].ratio), rightH = rightW / slides[2].ratio;
-    renderSlide(slides[0], leftW, leftH, (w - leftW) / 2 + (page > 0 ? page - w : -w), (h - leftH) / 2);
-    renderSlide(slides[2], rightW, rightH, (w - rightW) / 2 + (page < 0 ? page + w : w), (h - rightH) / 2);
+    const neighborAlpha = shrinking ? clamp((pullScale - dismissThreshold()) / Math.max(.05, 1 - dismissThreshold()), 0, 1) : 1;
+    renderSlide(slides[0], leftW, leftH, (w - leftW) / 2 + (page > 0 ? page - w : -w), (h - leftH) / 2, 1, neighborAlpha);
+    renderSlide(slides[2], rightW, rightH, (w - rightW) / 2 + (page < 0 ? page + w : w), (h - rightH) / 2, 1, neighborAlpha);
 
     if (shrinking) {
       const [ax, ay] = pullOrigin(w, h);
@@ -372,19 +387,38 @@ const lightbox = (() => {
   }
 
   function tween(duration, onStep, onDone) {
-    cancelAnimationFrame(animation);
+    stopAnim();
     const since = performance.now(), instant = reducedMotion.matches || duration <= 0;
     const power = params.easePower;
     function tick(now) {
       const t = instant ? 1 : clamp((now - since) / duration, 0, 1);
       onStep(1 - (1 - t) ** power, t);
       if (t < 1) animation = requestAnimationFrame(tick);
-      else onDone();
+      else { animation = 0; onDone(); }
     }
     tick(since);
   }
 
+  function startPageGlide(fromPage = view.page) {
+    stopPageGlide();
+    if (Math.abs(fromPage) < 1 || reducedMotion.matches) { view.page = 0; return; }
+    view.page = fromPage;
+    const { w } = geometry();
+    const duration = scaledDuration(Math.abs(fromPage) / Math.max(1, w), 220, 120, "linear");
+    const since = performance.now(), power = params.easePower;
+    function step(now) {
+      if (!dialog.open || !isOpen() || input.axis === "x") { pageGlide = 0; return; }
+      const t = duration <= 0 ? 1 : clamp((now - since) / duration, 0, 1);
+      view.page = t >= 1 ? 0 : fromPage * ((1 - t) ** power);
+      draw();
+      if (t < 1) pageGlide = requestAnimationFrame(step);
+      else pageGlide = 0;
+    }
+    pageGlide = requestAnimationFrame(step);
+  }
+
   function animateTo(target, done) {
+    stopPageGlide();
     const start = { ...view }, keys = Object.keys(target);
     const duration = settled(target) ? 0 : scaledDuration(travelRatio(start, target), params.settleMs, params.settleMinMs, params.settleCurve);
     tween(
@@ -414,7 +448,9 @@ const lightbox = (() => {
 
   function zoomTo(zoom, anchor = { x: 0, y: 0 }) {
     if (!isOpen() || input.pointers.size) return;
+    resetTrackInput();
     cancelAnimationFrame(animation);
+    promoteDominant(false);
     const nextZoom = clamp(zoom, 1, params.maxZoom);
     scaleAt(nextZoom, anchor, anchor);
     Object.assign(view, withinPhoto());
@@ -495,15 +531,10 @@ const lightbox = (() => {
     }
   }
 
-  function openPhoto(position, step = 0) {
-    if (state === "closing") return;
-    cancelAnimationFrame(animation);
+  function mountSlides(target, step, opening) {
     clearTimeout(upgradeTimer);
     upgradeTimer = 0;
-    resetTrackInput();
-    input.pointers.clear();
-    input.lastTap = null;
-    const target = wrap(position), count = photoGrid.tiles.length, opening = !dialog.open;
+    const count = photoGrid.tiles.length;
     if (!opening && count > 1) {
       if (step === 1 || (!step && slides[2].index === target)) slides.push(slides.shift());
       else if (step === -1 || (!step && slides[0].index === target)) slides.unshift(slides.pop());
@@ -521,33 +552,69 @@ const lightbox = (() => {
     map.style.setProperty("--ratio", active.ratio);
     mapImg.src = active.element.lastElementChild?.src || previewUrl(thumb);
     notice.textContent = "";
+    if (!opening && thumb) {
+      thumb.loading = "eager";
+      thumb.decoding = "sync";
+      thumb.decode?.().catch(() => {});
+    }
+    if (active.full) {
+      pending = null;
+      mapImg.src = link.href;
+    }
+    // Debounce full-res decodes on rapid turns so blast-swiping never starves the image decoder.
+    if (opening) return () => runUpgrades(active, index);
+    upgradeTimer = setTimeout(() => { upgradeTimer = 0; runUpgrades(active, index); }, 90);
+    return null;
+  }
+
+  function promoteDominant(keepOffset = false) {
+    const w = stageBox.w || geometry().w;
+    if (!w || photoGrid.tiles.length <= 1 || Math.abs(view.page) <= w / 2) return 0;
+    const step = view.page < 0 ? 1 : -1;
+    const carry = keepOffset ? clamp(view.page + step * w, -w, w) : 0;
+    mountSlides(wrap(index + step), step, false);
+    view.page = carry;
+    if (input.trackMeta) input.trackMeta.promoted = true;
+    return step;
+  }
+
+  function absorbIntoZoom() {
+    promoteDominant(false);
+    if (view.pull > 0 && view.zoom >= 1) {
+      view.zoom = pullScaleFor(view.pull);
+      view.pull = 0;
+    }
+    view.page = 0;
+  }
+
+  function openPhoto(position, step = 0) {
+    if (state === "closing") return;
+    stopAnim();
+    stopPageGlide();
+    resetTrackInput();
+    input.pointers.clear();
+    input.lastTap = null;
+    const opening = !dialog.open;
+    const startUpgrades = mountSlides(wrap(position), step, opening);
     Object.assign(view, fitted);
     if (opening) {
       dialog.showModal();
       emitToggle(true);
       measureStage();
       syncGrid(true);
-    } else if (thumb) {
-      thumb.loading = "eager";
-      thumb.decoding = "sync";
-      thumb.decode?.().catch(() => {});
     }
     draw();
     syncTrack();
-    if (active.full) {
-      pending = null;
-      mapImg.src = link.href;
-    }
-    // Debounce full-res decodes on rapid turns so blast-swiping never starves the image decoder.
-    if (opening) runUpgrades(active, index);
-    else upgradeTimer = setTimeout(() => { upgradeTimer = 0; runUpgrades(active, index); }, 90);
+    startUpgrades?.();
   }
 
   function runDismiss() {
     if (!dialog.open) return;
-    cancelAnimationFrame(animation);
+    stopAnim();
+    stopPageGlide();
     clearTimeout(upgradeTimer);
     upgradeTimer = 0;
+    if (promoteDominant(true)) draw();
     const now = performance.now();
     if (view.pull > 0 || (input.trackMeta && input.trackMeta.wheelPull > 0)) {
       input.absorbUntil = Math.max(input.absorbUntil, now + 1800);
@@ -601,6 +668,8 @@ const lightbox = (() => {
   }
 
   function finishClose() {
+    stopAnim();
+    stopPageGlide();
     clearTimeout(upgradeTimer);
     upgradeTimer = 0;
     resetTrackInput();
@@ -613,6 +682,7 @@ const lightbox = (() => {
     pending = input.trackMeta = input.axis = null;
     input.scrolled = false;
     input.lastWheel = 0;
+    input.ignoreSnapUntil = 0;
     stageBox.w = stageBox.h = 0;
     stageBox.cursor = stageBox.tileAnchor = null;
     stageBox.minScale = .15;
@@ -623,7 +693,7 @@ const lightbox = (() => {
     telemetry.page = 0;
     for (const s of slides) {
       s.index = -1; s.full = s.clipped = false; s.loading = -1;
-      s.w = s.h = 0; s.tx = s.ty = s.scale = NaN;
+      s.w = s.h = 0; s.tx = s.ty = s.scale = NaN; s.opacity = 1;
       s.element.style.cssText = "";
       s.element.replaceChildren();
     }
@@ -658,15 +728,15 @@ const lightbox = (() => {
   }
 
   function dragBy(dx, dy, axis) {
-    const { w, h, limitX, limitY } = geometry(), horiz = axis === "x";
-    const x = view.x + dx + (horiz ? view.page : 0);
-    const y = view.y + dy + (horiz ? 0 : view.pull);
+    const { w, h, limitX, limitY } = geometry(), horiz = axis === "x", zoomed = view.zoom > 1;
+    const x = view.x + dx + (horiz && !zoomed ? view.page : 0);
+    const y = view.y + dy + (!horiz && !zoomed ? view.pull : 0);
     view.x = clamp(x, Math.min(view.x, -limitX), Math.max(view.x, limitX));
     view.y = clamp(y, Math.min(view.y, -limitY), Math.max(view.y, limitY));
-    if (horiz && photoGrid.tiles.length > 1) view.page = clamp(x - view.x, -w, w);
-    if (!horiz) {
+    if (zoomed) return;
+    if (horiz && view.zoom === 1 && photoGrid.tiles.length > 1) view.page = clamp(x - view.x, -w, w);
+    if (!horiz && view.zoom === 1) {
       view.pull = clamp(y - view.y, 0, pullDistance(h));
-      if (view.page) view.page = Math.abs(view.page) < 1 ? 0 : view.page * .72;
     }
   }
 
@@ -687,7 +757,8 @@ const lightbox = (() => {
     if (!isOpen() || event.button !== 0) return;
     trackCursor(event);
     resetTrackInput();
-    cancelAnimationFrame(animation);
+    stopAnim();
+    stopPageGlide();
     if (input.scrolled) syncTrack();
     input.pointers.set(event.pointerId, event);
     stage.setPointerCapture(event.pointerId);
@@ -705,6 +776,7 @@ const lightbox = (() => {
     } else {
       input.gesture.tap = input.gesture.onMap = false;
       input.lastTap = null;
+      if (input.pointers.size === 2) absorbIntoZoom();
     }
     rebase(input.pointers.size === 1);
     input.gesture.history = [[event.timeStamp, view.page, view.pull]];
@@ -727,11 +799,17 @@ const lightbox = (() => {
         const dx = point.x - g.start.x, dy = point.y - g.start.y;
         if (g.tap && Math.hypot(dx, dy) < 5) return;
         g.axis = Math.abs(dx) >= Math.abs(dy) ? "x" : "y";
+        if (g.axis === "y" && view.zoom <= 1) {
+          promoteDominant(true);
+          if (Math.abs(view.page) >= 1) startPageGlide(view.page);
+        }
       }
       g.tap = false;
       dragBy(point.x - last.x, point.y - last.y, g.axis);
-      if (g.axis === "y" && view.pull) transition("pull");
-      else if (g.axis === "x" && view.page) transition("swipe");
+      if (view.zoom <= 1) {
+        if (g.axis === "y" && view.pull) transition("pull");
+        else if (g.axis === "x" && view.page) transition("swipe");
+      }
     }
     g.last = point;
     recordSample(g.history, event.timeStamp, view.page, view.pull);
@@ -752,11 +830,11 @@ const lightbox = (() => {
         input.lastTap = { time: event.timeStamp, x: event.clientX, y: event.clientY };
         if (g.backdrop && view.zoom === 1) return transition("dismiss");
       } else input.lastTap = null;
-      if (view.zoom < dismissThreshold() || (view.pull > 8 && project(g.history, event.timeStamp, view.pull, "pull") > stageBox.h * .2)) {
+      if (view.zoom < dismissThreshold() || (view.zoom <= 1 && view.pull > 8 && project(g.history, event.timeStamp, view.pull, "pull") > stageBox.h * .2)) {
         return transition("dismiss");
       }
       const dir = Math.sign(view.page);
-      if (g.axis === "x" && dir * project(g.history, event.timeStamp, view.page, "page") > stageBox.w / 2) {
+      if (view.zoom <= 1 && g.axis === "x" && dir * project(g.history, event.timeStamp, view.page, "page") > stageBox.w / 2) {
         return transition("settle", { step: -dir, target: { page: dir * stageBox.w, pull: 0 } });
       }
     }
@@ -775,21 +853,25 @@ const lightbox = (() => {
   function resetTrackInput() {
     clearTimeout(input.pinchTimer);
     clearTimeout(input.scrollTimer);
+    stopPageGlide();
     input.pinch = null;
     input.wheelPinching = false;
+    input.inertia = null;
+    input.ignoreSnapUntil = 0;
   }
 
   function syncTrack() {
     if (!dialog.open || state === "closing") return;
     const { w, h, limitX, limitY } = geometry();
     if (!w || !h) return;
-    const hasNeighbors = photoGrid.tiles.length > 1;
-    const mode = (limitX > 0 || limitY > 0) ? "none" : params.snapAxis;
+    const zoomed = view.zoom > 1;
+    const hasNeighbors = !zoomed && photoGrid.tiles.length > 1;
+    const mode = (zoomed || limitX > 0 || limitY > 0) ? "none" : params.snapAxis;
     const free = mode === "none", both = mode === "both";
     const { swipeSpeed, pullSpeed } = params;
     const padX = hasNeighbors ? Math.max(1, Math.round(w / swipeSpeed)) : 0;
-    const pullSpan = pullDistance(h), pullSpace = Math.max(1, Math.round(pullSpan / pullSpeed));
-    const key = `${w}:${h}:${limitX}:${limitY}:${hasNeighbors}:${mode}:${swipeSpeed}:${pullSpeed}`;
+    const pullSpan = pullDistance(h), pullSpace = zoomed ? 0 : Math.max(1, Math.round(pullSpan / pullSpeed));
+    const key = `${w}:${h}:${limitX}:${limitY}:${zoomed}:${hasNeighbors}:${mode}:${swipeSpeed}:${pullSpeed}`;
     const layoutChanged = key !== cache.layoutKey;
     if (layoutChanged) {
       cache.layoutKey = key;
@@ -816,56 +898,75 @@ const lightbox = (() => {
     if (layoutChanged) { void track.scrollLeft; track.style.scrollSnapType = ""; }
     input.trackMeta = {
       w, h, limitX, limitY, padX, pullSpan, pullSpace, hasNeighbors, free, both, swipeSpeed, pullSpeed,
-      originX, originY, left: track.scrollLeft, top: track.scrollTop,
-      lastSl: track.scrollLeft, lastSt: track.scrollTop, wheelPull: 0,
+      originX, originY, pullBase: originY, left: track.scrollLeft, top: track.scrollTop,
+      lastSl: track.scrollLeft, lastSt: track.scrollTop, wheelPull: 0, promoted: false, lockedY: false,
     };
     input.axis = null;
     input.scrolled = false;
+    input.inertia = null;
+    stopPageGlide();
     clearTimeout(input.scrollTimer);
   }
 
   function onTrackScroll() {
     const meta = input.trackMeta;
-    if (!dialog.open || !isOpen() || input.pointers.size || input.pinch || input.wheelPinching || !meta) return;
-    const { w, limitX, limitY, padX, originX, originY, pullSpan, hasNeighbors, free, both, swipeSpeed, pullSpeed, left, top } = meta;
+    if (!dialog.open || !isOpen() || input.pointers.size || input.pinch || input.wheelPinching || view.zoom < 1 || !meta) return;
+    const { w, limitX, limitY, padX, originX, originY, pullSpan, hasNeighbors, swipeSpeed, left, top } = meta;
     const sl = track.scrollLeft, st = track.scrollTop;
+    const now = performance.now();
+    const wheelActive = now - input.lastWheel < 45;
+    if (!wheelActive && ((animation && lastEdge === "bounce") || now < input.ignoreSnapUntil)) {
+      meta.lastSl = sl; meta.lastSt = st;
+      return;
+    }
     if (!input.scrolled && Math.abs(sl - left) < 1 && Math.abs(st - top) < 1) return;
     const prevSl = meta.lastSl, prevSt = meta.lastSt;
     meta.lastSl = sl;
     meta.lastSt = st;
     input.scrolled = true;
-    cancelAnimationFrame(animation);
+    stopAnim();
+    const zoomed = view.zoom > 1, canPage = hasNeighbors && !zoomed;
     const dx = originX - sl, dy = originY - st;
     const x = clamp(dx, -limitX, limitX), y = clamp(dy, -limitY, limitY);
-    const remX = hasNeighbors ? dx - x : 0, remY = Math.max(0, dy - y);
-    const rawPage = hasNeighbors ? clamp(remX * swipeSpeed, -w, w) : 0;
-    const rawPull = clamp(remY * pullSpeed, 0, pullSpan);
-    const now = performance.now();
-    const wheelActive = now - input.lastWheel < 45;
+    const remX = canPage ? dx - x : 0, remY = zoomed ? 0 : Math.max(0, dy - y);
+    const rawPage = canPage ? clamp(remX * swipeSpeed, -w, w) : 0;
+    const pullFor = base => zoomed ? 0 : pullSpan * clamp((base - st) / Math.max(1, base - limitY), 0, 1);
+    let rawPull = pullFor(meta.pullBase);
     if (!input.axis && (remX || remY)) {
-      if (Math.hypot(remX, remY) >= 8) input.axis = Math.abs(remX) >= remY ? "x" : "y";
-    } else if (input.axis === "y" && rawPull < 30 && Math.abs(remX) > remY * 2 && Math.abs(remX) > 24) {
+      if (Math.hypot(remX, remY) >= 8) {
+        input.axis = Math.abs(remX) >= remY ? "x" : "y";
+        if (input.axis === "y" && rawPull >= 30) meta.lockedY = true;
+      }
+    } else if (!meta.promoted && !meta.lockedY && input.axis === "y" && rawPull < 30 && Math.abs(remX) > remY * 2 && Math.abs(remX) > 24) {
       input.axis = "x";
-    } else if (input.axis === "x" && wheelActive && remY >= 32 && prevSt - st >= 4 && (prevSt - st) > Math.abs(sl - prevSl) * 1.5) {
+    } else if (input.axis === "x" && (
+      remY >= 48 ||
+      (wheelActive && prevSt - st >= 4 && (prevSt - st) > Math.abs(sl - prevSl) * 1.2 && remY >= (Math.abs(sl - originX) >= padX - 4 ? 16 : 32))
+    )) {
       input.axis = "y";
-    } else if (input.axis && !remX && !remY) {
+      meta.lockedY = true;
+      meta.pullBase = prevSt > limitY ? Math.min(originY, prevSt) : originY;
+      rawPull = pullFor(meta.pullBase);
+      promoteDominant(true);
+      if (Math.abs(view.page) >= 1) startPageGlide(view.page);
+    } else if (!meta.promoted && !meta.lockedY && input.axis && !remX && !remY) {
       input.axis = null;
     }
     const axis = input.axis || (Math.abs(remX) >= remY ? "x" : "y");
+    if (axis === "y" && rawPull >= 30) meta.lockedY = true;
     view.x = x; view.y = y;
-    view.page = axis === "x" ? rawPage : (view.page && Math.abs(view.page) >= 1 ? view.page * .72 : 0);
+    if (axis === "x") { stopPageGlide(); view.page = rawPage; }
+    else if (view.page && !pageGlide) startPageGlide(view.page);
     view.pull = axis === "y" ? rawPull : 0;
     if (wheelActive) meta.wheelPull = view.pull;
-    if (view.zoom <= 1) {
+    if (!zoomed && input.axis === "y" && !meta.free && !wheelActive && st === prevSt && sl !== prevSl) {
+      return onTrackScrollEnd();
+    }
+    if (!zoomed) {
       if (axis === "y" && view.pull) { if (state !== "pulling") transition("pull"); }
       else if (axis === "x" && view.page) { if (state !== "paging") transition("swipe"); }
     }
     draw();
-    if (axis === "y" && view.zoom <= 1 && (st <= 1 || rawPull >= pullSpan - 1)) {
-      input.scrolled = false;
-      input.axis = null;
-      return void transition("dismiss");
-    }
     if (!hasScrollEnd) {
       clearTimeout(input.scrollTimer);
       input.scrollTimer = setTimeout(onTrackScrollEnd, 150);
@@ -875,18 +976,19 @@ const lightbox = (() => {
   function onTrackScrollEnd() {
     clearTimeout(input.scrollTimer);
     const meta = input.trackMeta;
-    if (!dialog.open || !isOpen() || input.pointers.size || input.pinch || input.wheelPinching || !meta || !input.scrolled) return;
+    if (!dialog.open || !isOpen() || input.pointers.size || input.pinch || input.wheelPinching || view.zoom < 1 || !meta || !input.scrolled) return;
     const { w, padX, pullSpan, hasNeighbors, free, both } = meta;
     const sl = track.scrollLeft, st = track.scrollTop, axis = input.axis;
     meta.left = meta.lastSl = sl;
     meta.top = meta.lastSt = st;
     input.scrolled = false;
     input.axis = null;
+    if (view.zoom > 1) return;
     if (axis === "y") {
       const releasePull = both && input.lastWheel > 0 ? meta.wheelPull : view.pull;
       if (pullScaleFor(releasePull, pullSpan) < dismissThreshold()) return transition("dismiss");
-      if (!view.pull && !free && hasNeighbors && sl >= padX * 2 - 2) return transition("settle", { step: 1, immediate: true });
-      if (!view.pull && !free && hasNeighbors && sl <= 2) return transition("settle", { step: -1, immediate: true });
+      if (!meta.promoted && !meta.lockedY && !view.pull && !free && hasNeighbors && sl >= padX * 2 - 2) return transition("settle", { step: 1, immediate: true });
+      if (!meta.promoted && !meta.lockedY && !view.pull && !free && hasNeighbors && sl <= 2) return transition("settle", { step: -1, immediate: true });
       return transition("bounce", { target: withinPhoto() });
     }
     if (!free && hasNeighbors) {
@@ -933,28 +1035,94 @@ const lightbox = (() => {
         if (now - input.lastPinch < 60) { if (event.cancelable) event.preventDefault(); return; }
         clearTimeout(input.pinchTimer);
         input.wheelPinching = false;
-        if (view.zoom >= 1) syncTrack();
+        if (view.zoom < 1) {
+          finishPinch(false);
+          if (event.cancelable) event.preventDefault();
+          return;
+        }
+        syncTrack();
       }
       const gap = now - input.lastWheel, meta = input.trackMeta;
       input.lastWheel = now;
+      input.ignoreSnapUntil = 0;
+      if (!hasScrollEnd && input.scrolled) {
+        clearTimeout(input.scrollTimer);
+        input.scrollTimer = setTimeout(onTrackScrollEnd, 150);
+      }
       if (event.cancelable && input.scrolled && meta && !meta.free && meta.hasNeighbors && input.axis !== "y") {
         const pullDown = event.deltaY < 0 && -event.deltaY > Math.abs(event.deltaX) * 1.5;
-        if (track.scrollLeft >= meta.padX * 2 - 4 && (pullDown || (gap >= 80 && event.deltaX > 0))) {
-          return void transition("settle", { step: 1, immediate: true });
+        const sl = track.scrollLeft;
+        const step = (sl >= meta.padX * 2 - 4 && gap >= 80 && event.deltaX > 0) || (pullDown && sl > meta.padX * 1.5) ? 1
+          : (sl <= 4 && gap >= 80 && event.deltaX < 0) || (pullDown && sl < meta.padX * .5) ? -1 : 0;
+        if (step) {
+          const carry = pullDown ? clamp(view.page + step * meta.w, -meta.w, meta.w) : 0;
+          transition("settle", { step, immediate: true });
+          if (pullDown) {
+            input.axis = "y";
+            input.scrolled = true;
+            if (input.trackMeta) input.trackMeta.lockedY = input.trackMeta.promoted = true;
+            if (Math.abs(carry) >= 1) { startPageGlide(carry); draw(); }
+          }
+          return;
         }
-        if (track.scrollLeft <= 4 && (pullDown || (gap >= 80 && event.deltaX < 0))) {
-          return void transition("settle", { step: -1, immediate: true });
+      }
+      if (view.zoom <= 1 && input.axis === "y" && event.deltaY < 0 && -event.deltaY >= Math.abs(event.deltaX)) {
+        // Detect released macOS momentum tail coasting against scrollTop=0 (min grid size) across 60Hz/120Hz+
+        // displays so flicks dismiss promptly instead of freezing for ~1s, while holding still or manual pushing stays held.
+        const atWall = track.scrollTop <= 1;
+        if (atWall && event.momentum === true) {
+          input.scrolled = false;
+          input.axis = null;
+          if (event.cancelable) event.preventDefault();
+          return void transition("dismiss");
         }
+        const ady = -event.deltaY, dx = event.deltaX, adx = Math.abs(dx), w = input.inertia;
+        const maxDrop = w ? Math.max(2, w.prevDy * .18) : 0;
+        const dxOk = !w || (adx <= w.prevAdx && (!adx || !w.prevDx || Math.sign(dx) === Math.sign(w.prevDx)));
+        if (!w || now - w.lastT > 45 || ady > w.prevDy || (w.prevDy - ady) > maxDrop || !dxOk) {
+          input.inertia = {
+            startT: now, startDy: ady, prevDy: ady, prevDx: dx, prevAdx: adx,
+            lastT: now, count: 1, drops: 0, pureY: adx === 0, wallHits: atWall ? 1 : 0,
+          };
+        } else {
+          if (ady < w.prevDy) w.drops++;
+          if (adx > 0) w.pureY = false;
+          if (atWall) w.wallHits++;
+          w.prevDy = ady; w.prevDx = dx; w.prevAdx = adx;
+          w.lastT = now; w.count++;
+          if (atWall && w.wallHits >= 2) {
+            const elapsed = now - w.startT, dropped = w.startDy - ady;
+            const decay100 = elapsed > 0 ? Math.pow(ady / w.startDy, 100 / elapsed) : 1;
+            const fast = elapsed >= 38 && w.count >= 4 && w.drops >= 2 && w.startDy >= 14
+              && dropped >= Math.max(2, w.startDy * .07) && decay100 >= .42 && decay100 <= .90;
+            const gentle = w.pureY && elapsed >= 75 && w.count >= 6 && w.drops >= 2 && w.startDy >= 4
+              && dropped >= 2 && decay100 >= .42 && decay100 <= .88;
+            if (fast || gentle) {
+              input.scrolled = false;
+              input.axis = null;
+              if (event.cancelable) event.preventDefault();
+              return void transition("dismiss");
+            }
+          }
+        }
+      } else {
+        input.inertia = null;
+      }
+      if (event.cancelable && meta && Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
+        const st = track.scrollTop, maxSt = meta.pullSpace + meta.limitY * 2;
+        if ((st <= 0 && event.deltaY < 0) || (st >= maxSt && event.deltaY > 0)) event.preventDefault();
       }
       return;
     }
     if (event.cancelable) event.preventDefault();
+    const startingPinch = !input.wheelPinching;
     resetTrackInput();
     input.axis = null;
     input.scrolled = false;
     input.wheelPinching = true;
     input.lastPinch = now;
-    cancelAnimationFrame(animation);
+    stopAnim();
+    if (startingPinch) absorbIntoZoom();
     const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? stageBox.h : 1;
     const factor = (event.ctrlKey && event.deltaMode === 0 ? .01 : .004) * params.zoomSpeed;
     const anchor = stagePoint(event);
@@ -969,7 +1137,8 @@ const lightbox = (() => {
     event.preventDefault();
     if (!isOpen() || input.pointers.size) return;
     resetTrackInput();
-    cancelAnimationFrame(animation);
+    stopAnim();
+    absorbIntoZoom();
     input.pinch = { baseline: { ...view }, start: stagePoint(event) };
   });
   stage.addEventListener("gesturechange", event => {
@@ -1001,7 +1170,7 @@ const lightbox = (() => {
   dialog.onkeydown = event => {
     if (!isOpen() || input.pointers.size || event.ctrlKey || event.metaKey || event.altKey) return;
     if (event.target?.matches?.("input, select, textarea")) return;
-    if (event.shiftKey && view.zoom > 1 && event.key.startsWith("Arrow")) {
+    if (view.zoom > 1 && event.key.startsWith("Arrow")) {
       view.x += ({ ArrowLeft: stageBox.w / 5, ArrowRight: -stageBox.w / 5 })[event.key] || 0;
       view.y += ({ ArrowUp: stageBox.h / 5, ArrowDown: -stageBox.h / 5 })[event.key] || 0;
       zoomTo(view.zoom);

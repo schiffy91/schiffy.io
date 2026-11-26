@@ -246,7 +246,7 @@ export function createSimulator({
     return a;
   });
 
-  let openCb;
+  let openCb, lastFocusedTile = -1;
   const photoGrid = {
     tiles,
     select(i) {
@@ -254,7 +254,12 @@ export function createSimulator({
       selectedIdx = i;
       tiles[i].classList.add("in-viewer");
     },
-    restore() { if (selectedIdx >= 0) tiles[selectedIdx].classList.remove("in-viewer"); },
+    restore() {
+      if (selectedIdx >= 0) {
+        tiles[selectedIdx].classList.remove("in-viewer");
+        lastFocusedTile = selectedIdx;
+      }
+    },
     onOpen(cb) { openCb = cb; },
   };
 
@@ -386,7 +391,7 @@ export function createSimulator({
       if (done) {
         const wasOnTrack = trackMomentum.onTrack;
         trackMomentum = null;
-        if (wasOnTrack && dialog.open && hasScrollEnd) {
+        if (wasOnTrack && !compositorSnap && dialog.open && hasScrollEnd) {
           track.dispatch("scrollend");
           sampleFrame("scrollend");
         }
@@ -413,18 +418,20 @@ export function createSimulator({
         compositorSnap.step++;
         const p = Math.min(1, compositorSnap.step / compositorSnap.frames);
         const ease = 1 - (1 - p) ** 3;
-        const nextX = compositorSnap.startX + (compositorSnap.targetX - compositorSnap.startX) * ease;
-        const nextY = compositorSnap.startY + (compositorSnap.targetY - compositorSnap.startY) * ease;
         compositorSnap.committing = true;
-        track.scrollLeft = nextX;
-        track.scrollTop = nextY;
+        if (compositorSnap.targetX !== null) {
+          track.scrollLeft = compositorSnap.startX + (compositorSnap.targetX - compositorSnap.startX) * ease;
+        }
+        if (compositorSnap.targetY !== null) {
+          track.scrollTop = compositorSnap.startY + (compositorSnap.targetY - compositorSnap.startY) * ease;
+        }
         compositorSnap.committing = false;
         queuedTrackScroll = false;
         track.dispatch("scroll");
         sampleFrame("compositor-snap");
         if (p >= 1) {
           compositorSnap = null;
-          if (hasScrollEnd) {
+          if (!trackMomentum && hasScrollEnd) {
             track.dispatch("scrollend");
             sampleFrame("scrollend");
           }
@@ -457,8 +464,10 @@ export function createSimulator({
   function wheelTick(dx, dy = 0, { cancelable = false, ctrlKey = false, metaKey = false, clientX = w / 2, clientY = h / 2, discrete = false, recordAsInput = true } = {}) {
     const prevInput = userInputActive;
     if (recordAsInput) userInputActive = true;
-    compositorSnap = null;
-    if (recordAsInput) trackMomentum = null;
+    if (recordAsInput) {
+      compositorSnap = null;
+      trackMomentum = null;
+    }
 
     if (!dialog.open) {
       const ev = winObj.dispatch("wheel", { deltaX: dx, deltaY: dy, deltaMode: 0, ctrlKey, metaKey, clientX, clientY, cancelable });
@@ -509,19 +518,25 @@ export function createSimulator({
     const targetX = hasXSnap ? nearestTarget(track.scrollLeft + vx * 5, xs) : track.scrollLeft;
     const targetY = hasYSnap ? nearestTarget(track.scrollTop + vy * 5, ys) : track.scrollTop;
 
-    if (threadedCompositor && (hasXSnap && Math.abs(targetX - track.scrollLeft) > 0.5 || hasYSnap && Math.abs(targetY - track.scrollTop) > 0.5)) {
+    const snapX = hasXSnap && Math.abs(targetX - track.scrollLeft) > 0.5;
+    const snapY = hasYSnap && Math.abs(targetY - track.scrollTop) > 0.5;
+    const hasFreeY = !hasYSnap && Math.abs(vy) >= 1;
+    const hasFreeX = !hasXSnap && Math.abs(vx) >= 1;
+
+    if (threadedCompositor && (snapX || snapY)) {
       compositorSnap = {
         startX: track.scrollLeft,
         startY: track.scrollTop,
-        targetX,
-        targetY,
+        targetX: snapX ? targetX : null,
+        targetY: snapY ? targetY : null,
         step: 0,
         frames: snapFrames,
         committing: false,
       };
-    } else if (Math.hypot(vx, vy) >= 1) {
-      trackMomentum = { vx, vy, decay, onTrack: track.style.overflow !== "hidden" };
-    } else if (hasScrollEnd) {
+    }
+    if (hasFreeX || hasFreeY) {
+      trackMomentum = { vx: hasFreeX ? vx : 0, vy: hasFreeY ? vy : 0, decay, onTrack: track.style.overflow !== "hidden" };
+    } else if (!compositorSnap && hasScrollEnd) {
       setTimeoutMock(() => {
         if (dialog.open) {
           track.dispatch("scrollend");
@@ -571,6 +586,118 @@ export function createSimulator({
     return res;
   }
 
+  // Semantic, aspect-ratio-agnostic hit-target helpers
+  function hitPhoto(u = 0.5, v = 0.5) {
+    const cur = currentFrame();
+    const r = cur.getBoundingClientRect();
+    return { clientX: r.left + r.width * u, clientY: r.top + r.height * v, target: cur };
+  }
+
+  function hitBackdrop() {
+    const cur = currentFrame();
+    const r = cur.getBoundingClientRect();
+    if (r.left > 8) return { clientX: r.left / 2, clientY: h / 2, target: stage };
+    if (r.right < w - 8) return { clientX: (r.right + w) / 2, clientY: h / 2, target: stage };
+    if (r.top > 8) return { clientX: w / 2, clientY: r.top / 2, target: stage };
+    if (r.bottom < h - 8) return { clientX: w / 2, clientY: (r.bottom + h) / 2, target: stage };
+    return null;
+  }
+
+  function hitMinimap(u = 0.5, v = 0.5) {
+    const r = map.getBoundingClientRect();
+    return { clientX: r.left + r.width * u, clientY: r.top + r.height * v, target: map };
+  }
+
+  // Center-proximity dominant photo (invariant to portrait-vs-landscape pixel area)
+  function dominantPhoto() {
+    let bestAlt = "", bestDist = Infinity;
+    for (const f of frames) {
+      if (f.hidden || !f.firstElementChild) continue;
+      const r = f.getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      const dist = Math.abs(cx - w / 2);
+      if (dist < bestDist) { bestDist = dist; bestAlt = f.firstElementChild.alt; }
+    }
+    return bestAlt;
+  }
+
+  // Realistic macOS trackpad flick with active burst + decaying momentum tail (scrollend only after tail finishes)
+  function macosTrackpadFlick({ vx = 0, vy = 0, burstFrames = 3, cancelableFirst = true, decay = 0.90 } = {}) {
+    for (let i = 0; i < burstFrames; i++) {
+      wheelTick(vx, vy, { cancelable: cancelableFirst && i === 0, recordAsInput: true });
+      stepFrame(16);
+    }
+    releaseTrackpad({ vx, vy, decay });
+  }
+
+  // Replay a real browser-recorded JSON trace (from ?debug Rec) with exact millisecond timestamps and compositor scroll positions
+  function replayRecordedEvents(events, { fromT = -Infinity, toT = Infinity, originSl = null, originSt = null } = {}) {
+    const slice = events.filter(ev => ev.t >= fromT && ev.t <= toT);
+    if (!slice.length) return;
+    // Align recorded scroll coordinates to the simulator's live track origin when stage height differs (e.g. ?debug bar)
+    const firstOpen = events.find(ev => ev.open && ev.state === "viewing" && typeof ev.sl === "number" && ev.sl > 0);
+    const refSl = originSl ?? firstOpen?.sl ?? track.scrollLeft;
+    const refSt = originSt ?? firstOpen?.st ?? track.scrollTop;
+    const simSl0 = Math.max(0, (parseFloat(trackSpace.style.width) - w) / 2);
+    const simSt0 = Math.max(0, parseFloat(trackSpace.style.height) - h);
+    const mapSl = sl => refSl > 0 ? Math.round((sl / refSl) * simSl0) : sl;
+    const mapSt = st => refSt > 0 ? Math.round((st / refSt) * simSt0) : st;
+    const stepExact = ms => {
+      let rem = ms;
+      while (rem > 0) { const step = Math.min(16, rem); stepFrame(step); rem -= step; }
+    };
+    let lastT = slice[0].t;
+    for (const ev of slice) {
+      const dt = Math.max(0, ev.t - lastT);
+      if (dt > 0) stepExact(dt);
+      lastT = ev.t;
+      if (ev.type === "wheel") {
+        const cx = (ev.stageUV?.[0] ?? 0.5) * w, cy = (ev.stageUV?.[1] ?? 0.5) * h;
+        const stillOpen = dialog.open && lightbox.state !== "closing";
+        if (stillOpen && !ev.cancelable && typeof ev.sl === "number" && typeof ev.st === "number") {
+          track.scrollLeft = mapSl(ev.sl);
+          track.scrollTop = mapSt(ev.st);
+        }
+        const payload = {
+          deltaX: ev.dx || 0, deltaY: ev.dy || 0, deltaMode: 0,
+          ctrlKey: Boolean(ev.ctrl), metaKey: Boolean(ev.meta),
+          cancelable: Boolean(ev.cancelable), clientX: cx, clientY: cy,
+          ...(typeof ev.momentum === "boolean" ? { momentum: ev.momentum } : {}),
+        };
+        if (stillOpen) {
+          const res = stage.dispatch("wheel", payload);
+          if (!res.defaultPrevented && ev.cancelable && typeof ev.sl === "number" && typeof ev.st === "number") {
+            track.scrollLeft = mapSl(ev.sl);
+            track.scrollTop = mapSt(ev.st);
+          }
+        } else {
+          winObj.dispatch("wheel", payload);
+        }
+        sampleFrame("trace:wheel");
+      } else if (ev.type === "scroll") {
+        if (dialog.open && lightbox.state !== "closing") {
+          if (typeof ev.sl === "number") track.scrollLeft = mapSl(ev.sl);
+          if (typeof ev.st === "number") track.scrollTop = mapSt(ev.st);
+          track.dispatch("scroll");
+          sampleFrame("trace:scroll");
+        }
+      } else if (ev.type === "scrollend") {
+        if (dialog.open && lightbox.state !== "closing") {
+          if (typeof ev.sl === "number") track.scrollLeft = mapSl(ev.sl);
+          if (typeof ev.st === "number") track.scrollTop = mapSt(ev.st);
+          track.dispatch("scrollend");
+          sampleFrame("trace:scrollend");
+        }
+      } else if (ev.type === "keydown") {
+        winObj.dispatch("keydown", {
+          key: ev.key, shiftKey: Boolean(ev.shift), ctrlKey: Boolean(ev.ctrl),
+          metaKey: Boolean(ev.meta), altKey: Boolean(ev.altKey), target: dialog,
+        });
+        sampleFrame("trace:keydown");
+      }
+    }
+  }
+
   function startRecording() { trace.length = 0; recording = true; sampleFrame("start"); }
   function stopRecording() { recording = false; return [...trace]; }
   function setUserInput(v) { userInputActive = v; }
@@ -589,7 +716,9 @@ export function createSimulator({
   return {
     docEl, head, body, dialog, stage, track, trackSpace, viewport, frames, map, bounds, notice, tiles,
     closeEvents, decodedUrls, pendingDecodes, trace, lightbox, win: winObj,
+    get lastFocusedTile() { return lastFocusedTile; },
     open: i => openCb(i), currentFrame, stepFrame, advance, wheelTick, releaseTrackpad, pointerEvent,
+    hitPhoto, hitBackdrop, hitMinimap, dominantPhoto, macosTrackpadFlick, replayRecordedEvents,
     triggerResize, resolveDecode, rejectDecode, startRecording, stopRecording, setUserInput,
     measureHotPath, getNow: () => now,
   };
@@ -684,4 +813,27 @@ export function assertScrollYConstant(framesLog, expectedScrollY) {
   for (const f of framesLog) {
     assert.equal(f.scrollY, expectedScrollY, `Background scrollY drifted at t=${f.t} (state=${f.state}): ${f.scrollY} !== ${expectedScrollY}`);
   }
+}
+
+export function assertResponsivePull(framesLog, { afterT, maxLagMs = 48, maxScale = 0.95, label = "pull" } = {}) {
+  const windowFrames = framesLog.filter(f => f.t >= afterT && f.t <= afterT + maxLagMs);
+  assert.ok(windowFrames.length > 0, `${label}: no frames recorded in [${afterT}, ${afterT + maxLagMs}]`);
+  const responded = windowFrames.some(f => f.scale < maxScale || f.state === "pulling" || f.state === "closing" || !f.open);
+  assert.ok(
+    responded,
+    `${label}: photo stayed FROZEN after downward swipe (scales=[${windowFrames.map(f => f.scale.toFixed(2)).join(",")}], states=[${windowFrames.map(f => f.state).join(",")}])`
+  );
+}
+
+export function assertNoWallFreeze(framesLog, { afterT, maxFrozenMs = 450, label = "release" } = {}) {
+  // After an aggressive released flick hits scrollTop <= 1, the viewer must transition to closing/closed
+  // within maxFrozenMs rather than sitting frozen motionless for a 1.2s macOS momentum tail.
+  const wallFrame = framesLog.find(f => f.t >= afterT && f.open && f.trackTop <= 1);
+  if (!wallFrame) return;
+  const closedOrClosing = framesLog.find(f => f.t >= wallFrame.t && (f.state === "closing" || !f.open));
+  const waited = closedOrClosing ? closedOrClosing.t - wallFrame.t : (framesLog[framesLog.length - 1].t - wallFrame.t);
+  assert.ok(
+    closedOrClosing && waited <= maxFrozenMs,
+    `${label}: photo froze at scrollTop=0 for ${waited}ms (limit ${maxFrozenMs}ms) during momentum tail`
+  );
 }

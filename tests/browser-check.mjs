@@ -295,7 +295,34 @@ async function run() {
     assert.equal(pullFrames[pullFrames.length - 1].scale, 1);
     console.log(`PASS gentle-pull: ${pullFrames.length} rAF frames, minScale=${minScale.toFixed(3)} -> 1.000, scrollY=500`);
 
-    // 4) Forceful swipe-down dismiss + trailing inertia wheel ticks at scrollY = 500
+    // 4) Hold at min grid size while pointer/fingers drag down past max pull + verify boundary wheel never drifts scrollY
+    const holdTile = await chrome.evalJs(`(() => {
+      const t = document.querySelector(".gallery .in-viewer").getBoundingClientRect();
+      return { width: t.width, height: t.height };
+    })()`);
+    // Boundary wheel upward at rest (scrollTop === maxSt) must not drift scrollY
+    await chrome.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: 640, y: 400, deltaX: 0, deltaY: 120 });
+    await sleep(60);
+    assert.equal(await chrome.evalJs(`window.scrollY`), 500, "boundary-wheel-up: scrollY stayed 500");
+    await chrome.send("Input.dispatchMouseEvent", { type: "mousePressed", x: 640, y: 80, button: "left", clickCount: 1 });
+    await chrome.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 640, y: 780, button: "left", buttons: 1 });
+    await sleep(250);
+    const heldAtMin = await chrome.evalJs(`(() => {
+      const r = document.querySelector(".frame.current").getBoundingClientRect();
+      return { open: document.querySelector("dialog").open, state: lightbox.state, width: r.width, height: r.height };
+    })()`);
+    assert.equal(heldAtMin.open, true, "hold-at-min: stays open while held past min size");
+    assert.equal(heldAtMin.state, "pulling", "hold-at-min: stays in pulling while held");
+    assert.ok(
+      Math.abs(heldAtMin.width - holdTile.width) < 1.5 && Math.abs(heldAtMin.height - holdTile.height) < 1.5,
+      `hold-at-min: held size ${heldAtMin.width.toFixed(1)}x${heldAtMin.height.toFixed(1)} matches grid tile ${holdTile.width.toFixed(1)}x${holdTile.height.toFixed(1)}`
+    );
+    await chrome.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 640, y: 80, button: "left", buttons: 1 });
+    await chrome.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: 640, y: 80, button: "left", clickCount: 1 });
+    await sleep(300);
+    console.log(`PASS hold-at-min: held at grid size ${heldAtMin.width.toFixed(1)}x${heldAtMin.height.toFixed(1)} without auto-closing`);
+
+    // 5) Forceful swipe-down dismiss + trailing inertia wheel ticks at scrollY = 500
     await startRec();
     await chrome.send("Input.synthesizeScrollGesture", {
       x: 640, y: 400, xDistance: 0, yDistance: 500, speed: 1800, gestureSourceType: "mouse",
@@ -304,9 +331,14 @@ async function run() {
       await sleep(20);
       await chrome.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: 640, y: 400, deltaX: 0, deltaY: -60 });
     }
-    await sleep(450);
+    await sleep(600);
     const dismissFrames = await stopRec();
-    for (const f of dismissFrames) assert.equal(f.scrollY, 500, `forceful-dismiss: scrollY drifted to ${f.scrollY}`);
+    for (const f of dismissFrames) {
+      if (f.scrollY !== 500) {
+        console.error("scrollY drift frames:", dismissFrames.slice(Math.max(0, dismissFrames.indexOf(f) - 4), dismissFrames.indexOf(f) + 4));
+        assert.equal(f.scrollY, 500, `forceful-dismiss: scrollY drifted to ${f.scrollY} (open=${f.open}, state=${f.state})`);
+      }
+    }
     const closed = dismissFrames[dismissFrames.length - 1];
     assert.equal(closed.open, false, "forceful-dismiss: dialog closed");
     assert.equal(closed.state, "closed");
@@ -361,15 +393,70 @@ async function run() {
     );
     console.log(`PASS pinch-min-size: ${pinched.width.toFixed(1)}x${pinched.height.toFixed(1)} matches grid tile ${tileSize.width.toFixed(1)}x${tileSize.height.toFixed(1)}`);
 
+    // 7) Zoomed in via trackpad pinch (ctrl+wheel) AND '+' key: swiping hard past edges pans only and never paginates
+    await chrome.send("Input.dispatchKeyEvent", { type: "keyDown", key: "0", text: "0" });
+    await sleep(300);
+    const zoomedAlt = await chrome.evalJs(`document.querySelector(".frame.current img").alt`);
+    for (let i = 0; i < 8; i++) {
+      await chrome.send("Input.dispatchMouseEvent", {
+        type: "mouseWheel", x: 640, y: 400, deltaX: 0, deltaY: -18, modifiers: 2, // Ctrl=2 (trackpad pinch-in)
+      });
+      await sleep(12);
+    }
+    await sleep(40); // swipe immediately right after pinch
+    await chrome.send("Input.synthesizeScrollGesture", {
+      x: 640, y: 400, xDistance: -900, yDistance: 0, speed: 1800, gestureSourceType: "mouse",
+    });
+    await chrome.send("Input.synthesizeScrollGesture", {
+      x: 640, y: 400, xDistance: 0, yDistance: 700, speed: 1800, gestureSourceType: "mouse",
+    });
+    await sleep(300);
+    const afterZoomPan = await chrome.evalJs(`({
+      open: document.querySelector("dialog").open,
+      state: lightbox.state,
+      alt: document.querySelector(".frame.current img")?.alt,
+      page: lightbox.telemetry.page,
+    })`);
+    assert.equal(afterZoomPan.open, true, "zoomed-pan: stayed open");
+    assert.equal(afterZoomPan.state, "zoomed", "zoomed-pan: stayed zoomed");
+    assert.equal(afterZoomPan.alt, zoomedAlt, "zoomed-pan: never paginated after trackpad pinch-in + two-finger swipe");
+    assert.equal(afterZoomPan.page, 0, "zoomed-pan: page stayed 0");
+    console.log(`PASS zoomed-no-paginate: trackpad pinch-in + hard two-finger swipe stayed on ${afterZoomPan.alt} (state=${afterZoomPan.state}, page=0)`);
+
+    // 8) Mid-flick horizontal pagination (> 50% across) + immediate swipe-down keeps the NEW dominant photo
+    await chrome.send("Input.dispatchKeyEvent", { type: "keyDown", key: "0", text: "0" });
+    await sleep(300);
+    const beforeMidFlick = await chrome.evalJs(`({
+      curr: document.querySelector(".frame.current img")?.alt,
+      next: [...document.querySelectorAll(".frame")].find(f => !f.classList.contains("current") && parseFloat(f.style.transform.match(/translate3d\\(([-\\d.]+)/)?.[1] || 0) > 400)?.firstElementChild?.alt,
+    })`);
+    // Flick > 65% into next slide (preventFling so it sits mid-snap), then immediately pull straight down
+    await chrome.send("Input.synthesizeScrollGesture", {
+      x: 640, y: 400, xDistance: -420, yDistance: 0, speed: 2400, gestureSourceType: "mouse", preventFling: true,
+    });
+    await chrome.send("Input.synthesizeScrollGesture", {
+      x: 640, y: 400, xDistance: 0, yDistance: 70, speed: 900, gestureSourceType: "mouse", preventFling: true,
+    });
+    await sleep(450);
+    const afterMidFlick = await chrome.evalJs(`({
+      open: document.querySelector("dialog").open,
+      state: lightbox.state,
+      alt: document.querySelector(".frame.current img")?.alt,
+    })`);
+    assert.equal(afterMidFlick.open, true, "mid-flick-pull: gentle pull bounced open");
+    assert.equal(afterMidFlick.alt, beforeMidFlick.next, `mid-flick-pull: kept new dominant photo ${beforeMidFlick.next} (never reverted to ${beforeMidFlick.curr})`);
+    console.log(`PASS mid-flick-swipe-down: stayed on new photo ${afterMidFlick.alt} (did not revert to ${beforeMidFlick.curr})`);
+
     assert.equal(chrome.errors.length, 0, `Zero console/runtime errors (got: ${chrome.errors.join("; ")})`);
     console.log("\nALL REAL-CHROME rAF FRAME CHECKS PASSED (0 errors).");
   } finally {
     chrome.close();
+    server.closeAllConnections?.();
     server.close();
   }
 }
 
-run().catch(err => {
+run().then(() => process.exit(0)).catch(err => {
   console.error("REAL-CHROME CHECK FAILED:", err);
   process.exit(1);
 });

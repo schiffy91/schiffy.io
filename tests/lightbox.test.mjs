@@ -230,6 +230,9 @@ test("math atoms: 7 pull anchors (zero reflow), linear/log curves, minMs floor, 
   floor.lightbox.setConfig({ dismissMaxMs: 400, dismissMinMs: 180, dismissCurve: "linear" });
   floor.track.scrollTop = 0;
   floor.track.dispatch("scroll");
+  assert.equal(floor.lightbox.state, "pulling", "Holds at min size while fingers stay down");
+  floor.track.dispatch("scrollend");
+  assert.equal(floor.lightbox.state, "closing", "Dismisses on release from min size");
   floor.advance(120);
   assert.equal(floor.dialog.open, true, "Honors dismissMinMs=180ms floor");
   floor.advance(120);
@@ -561,16 +564,30 @@ test("swipe-down lifecycle: gentle bounce, moderate dismiss, forceful immediate 
   assert.equal(held.closeEvents[0].inViewer, false, ".in-viewer cleared before dialog.close()");
   assert.equal(held.win.scrollY, 500);
 
-  // 3) Forceful flick hits min size -> immediate dismiss + post-close macOS momentum absorbed without moving scrollY
+  // 3) Swiping all the way down to min grid size holds while fingers stay down (even continuing to push down),
+  //    can reverse back up, and only snaps back to grid on release with post-close momentum absorbed
   const force = createSimulator({ w: 1200, h: 800, scrollY: 500 });
   force.open(0);
   force.advance(32);
   force.startRecording();
   force.wheelTick(0, -180, { cancelable: true });
-  force.wheelTick(0, -240, { cancelable: false }); // slams into st <= 1 -> closing immediately!
+  force.wheelTick(0, -240, { cancelable: false }); // hits st === 0 (grid tile min size)
+  assert.equal(force.track.scrollTop, 0);
+  assert.equal(force.lightbox.state, "pulling", "Holds at min grid size while fingers stay down");
+  assert.equal(force.dialog.open, true);
+  // Continuing to push down past min size and holding motionless must NEVER auto-close
+  for (let i = 0; i < 6; i++) {
+    force.wheelTick(0, -40, { cancelable: false });
+    force.stepFrame(16);
+  }
+  force.advance(1000);
+  assert.equal(force.lightbox.state, "pulling", "Still holding at min size after continued downward push + 1s hold");
+  assert.equal(force.dialog.open, true);
+
+  // Release fingers -> scrollend triggers dismiss and post-close momentum is absorbed without moving scrollY
+  force.track.dispatch("scrollend");
   assert.equal(force.lightbox.state, "closing");
   assert.equal(force.track.style.overflow, "hidden");
-  // Simulate strong residual macOS momentum continuing across close and past dialog.close()!
   force.releaseTrackpad({ vy: -45, decay: 0.88 });
   force.advance(450);
   const fLog = force.stopRecording();
@@ -583,14 +600,18 @@ test("swipe-down lifecycle: gentle bounce, moderate dismiss, forceful immediate 
   force.wheelTick(0, 120, { cancelable: true });
   assert.equal(force.win.scrollY, 620, "Gallery scrolls down immediately after close");
 
-  // 4) !hasScrollEnd fallback timer (browsers without scrollend) still bounces/dismisses
+  // 4) !hasScrollEnd fallback timer stays open while pushing at st === 0, then bounces/dismisses after fingers stop
   const noSE = createSimulator({ w: 1200, h: 800, hasScrollEnd: false });
   noSE.open(0);
   noSE.advance(32);
-  noSE.wheelTick(0, -45, { cancelable: true });
-  noSE.advance(350);
-  assert.equal(noSE.lightbox.state, "viewing");
-  assert.equal(noSE.lightbox.telemetry.scale, 1);
+  noSE.wheelTick(0, -400, { cancelable: true });
+  for (let i = 0; i < 4; i++) {
+    noSE.advance(80);
+    noSE.wheelTick(0, -30, { cancelable: false });
+  }
+  assert.equal(noSE.lightbox.state, "pulling", "Fallback timer stays open while fingers keep pushing at st=0");
+  noSE.advance(450);
+  assert.equal(noSE.dialog.open, false, "Fallback timer dismisses once fingers lift");
 });
 
 test("mid-pull dismiss keeps wheel absorber armed across closing animation and blocks post-close gallery bleed", () => {
@@ -737,6 +758,82 @@ test("zoom, pan, pinch (touch, ctrl+wheel, Safari gesture), double-tap fit, and 
   assert.equal(e.lightbox.state, "closing");
   e.advance(420);
   assert.equal(e.dialog.open, false);
+});
+
+test("zoomed in: trackpad scroll, pointer drag, and arrow keys pan within bounds and never paginate or pull-dismiss", () => {
+  // Test both landscape (Photo 0) and portrait (Photo 1, where slight zoom has limitX=0)
+  for (const startIdx of [0, 1]) {
+    const e = createSimulator({ w: 1200, h: 800 });
+    e.open(startIdx);
+    e.advance(32);
+    const startAlt = `Photo ${startIdx}`;
+    assert.equal(e.currentFrame().firstElementChild.alt, startAlt);
+
+    // Zoom in slightly on portrait (1.5x -> limitX=0, limitY>0) and 2.25x on landscape
+    e.dialog.dispatch("keydown", { key: "+" });
+    if (startIdx === 0) e.dialog.dispatch("keydown", { key: "+" });
+    assert.equal(e.lightbox.state, "zoomed");
+
+    // 1) Huge trackpad swipes left, right, and up past all edges must NEVER paginate or pull-dismiss
+    for (const [dx, dy] of [[900, 0], [-1800, 0], [0, -900]]) {
+      e.wheelTick(dx, dy, { cancelable: true });
+      e.track.dispatch("scrollend");
+      e.advance(200);
+      assert.equal(e.lightbox.state, "zoomed", `Stays zoomed after wheel (${dx},${dy})`);
+      assert.equal(e.currentFrame().firstElementChild.alt, startAlt, `Never paginates while zoomed (${dx},${dy})`);
+      assert.equal(e.lightbox.telemetry.page, 0);
+      assert.equal(e.dialog.open, true);
+    }
+
+    // 2) Huge 1-finger drags left, right, and down past edges must NEVER paginate or pull-dismiss
+    for (const [x1, y1, x2, y2] of [[900, 400, 50, 400], [50, 400, 1150, 400], [600, 50, 600, 750]]) {
+      e.pointerEvent("pointerdown", { pointerId: 1, button: 0, clientX: x1, clientY: y1, target: e.currentFrame() });
+      e.stepFrame(16);
+      e.pointerEvent("pointermove", { pointerId: 1, button: 0, clientX: x2, clientY: y2 });
+      e.stepFrame(16);
+      e.pointerEvent("pointerup", { pointerId: 1, button: 0, clientX: x2, clientY: y2 });
+      e.advance(250);
+      assert.equal(e.lightbox.state, "zoomed");
+      assert.equal(e.currentFrame().firstElementChild.alt, startAlt, "Pointer drag while zoomed never paginates");
+      assert.equal(e.lightbox.telemetry.page, 0);
+      assert.equal(e.dialog.open, true);
+    }
+
+    // 3) Arrow keys pan while zoomed instead of paginating away
+    e.dialog.dispatch("keydown", { key: "ArrowRight" });
+    e.dialog.dispatch("keydown", { key: "ArrowLeft" });
+    assert.equal(e.lightbox.state, "zoomed");
+    assert.equal(e.currentFrame().firstElementChild.alt, startAlt, "Arrow keys do not paginate while zoomed");
+
+    // 4) Fitting back to 1x immediately restores normal pagination
+    e.dialog.dispatch("keydown", { key: "0" });
+    e.advance(250);
+    assert.equal(e.lightbox.state, "viewing");
+    assert.equal(e.track.classList.contains("free"), false);
+
+    // 5) Trackpad pinch-in (ctrl+wheel) followed immediately (20ms + 70ms + 200ms) by two-finger swipe never paginates
+    for (let i = 0; i < 6; i++) {
+      e.wheelTick(0, -18, { ctrlKey: true, cancelable: true, clientX: 600, clientY: 400 });
+      e.stepFrame(16);
+    }
+    assert.equal(e.lightbox.state, "zoomed");
+    e.stepFrame(20); // within 60ms wheelPinching window
+    e.wheelTick(400, 0, { cancelable: true });
+    e.advance(64); // crosses 60ms -> syncTrack() locks out padX
+    e.wheelTick(600, 0, { cancelable: true });
+    e.track.dispatch("scrollend");
+    e.advance(200);
+    assert.equal(e.lightbox.state, "zoomed");
+    assert.equal(e.currentFrame().firstElementChild.alt, startAlt, "Pinch-in + immediate two-finger swipe never paginates");
+    assert.equal(e.lightbox.telemetry.page, 0);
+
+    // Fit back to 1x -> ArrowRight paginates cleanly again
+    e.dialog.dispatch("keydown", { key: "0" });
+    e.advance(250);
+    e.dialog.dispatch("keydown", { key: "ArrowRight" });
+    e.advance(32);
+    assert.equal(e.currentFrame().firstElementChild.alt, `Photo ${startIdx + 1}`, "Pagination works again at 1x");
+  }
 });
 
 test("ResizeObserver mid-viewing, mid-zoom, and mid-drag keeps geometry valid", () => {
