@@ -45,12 +45,13 @@ dialog {
   padding: 0;
   color: #eee;
   overflow: clip;
+  overscroll-behavior: none;
   --shade: 1;
   background: rgb(17 17 17 / var(--shade));
   font: 14px/1.3 system-ui, sans-serif;
   color-scheme: dark;
 }
-dialog::backdrop { background: transparent; }
+dialog::backdrop { background: transparent; overflow: hidden; overscroll-behavior: none; }
 .gallery .in-viewer { opacity: 0; }
 .stage { position: absolute; inset: 0; overflow: hidden; touch-action: none; overscroll-behavior: none; user-select: none; }
 .track {

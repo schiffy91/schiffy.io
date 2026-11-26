@@ -17,7 +17,7 @@ const lightbox = (() => {
     return el;
   });
   const slides = Array.from(viewport.querySelectorAll(".frame"), element => ({
-    element, index: -1, ratio: 1, full: false,
+    element, index: -1, ratio: 1, full: false, loading: -1,
     w: 0, h: 0, tx: NaN, ty: NaN, scale: NaN, clipped: false,
   }));
   const map = viewport.querySelector(".minimap");
@@ -30,7 +30,7 @@ const lightbox = (() => {
   const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
   const fitted = { zoom: 1, x: 0, y: 0, page: 0, pull: 0, fade: 0 };
   const view = { ...fitted };
-  const stageBox = { left: 0, top: 0, w: 0, h: 0, cursor: null, tileAnchor: null };
+  const stageBox = { left: 0, top: 0, w: 0, h: 0, cursor: null, tileAnchor: null, minScale: .15 };
   const cache = { synced: -1, layoutKey: "", shade: null, zoomed: null, mapHidden: null };
   const input = {
     pointers: new Map(), gesture: null, lastTap: null, pinch: null,
@@ -40,8 +40,9 @@ const lightbox = (() => {
   };
   const listeners = { state: new Set(), toggle: new Set() };
   const telemetry = { drawUs: 0, scale: 1, page: 0 };
+  const warmed = new Set();
 
-  let state = "closed", lastEdge = null, index = 0, pending = null, animation = 0;
+  let state = "closed", lastEdge = null, index = 0, pending = null, animation = 0, upgradeTimer = 0;
   const isOpen = () => state !== "closed" && state !== "closing";
 
   // --- Declarative State Graph (single source of truth for runtime + visualizer) ---
@@ -74,7 +75,7 @@ const lightbox = (() => {
         allowFrom: ["viewing", "paging", "pulling"],
         vars: {
           swipeSpeed: numVar("speed", 2.0, .5, 4, .1, v => v.toFixed(1) + "x"),
-          snapAxis:   optVar("snap", "both", [["both", "X+Y"], ["x", "X"], ["none", "off"]]),
+          snapAxis:   optVar("snap", "x", [["x", "X"], ["both", "X+Y"], ["none", "off"]]),
         },
       },
       {
@@ -96,7 +97,7 @@ const lightbox = (() => {
       },
       {
         id: "pull", from: "viewing", to: "pulling", label: "pull",
-        allowFrom: ["viewing", "pulling", "zoomed"],
+        allowFrom: ["viewing", "pulling", "paging", "zoomed"],
         vars: {
           pullSpeed:  numVar("speed", 1.5, .5, 4, .1, v => v.toFixed(1) + "x"),
           pullAnchor: optVar("anchor", "cursor", anchorOpts),
@@ -104,6 +105,7 @@ const lightbox = (() => {
       },
       {
         id: "bounce", from: "pulling", to: "viewing", label: "bounce",
+        allowFrom: ["pulling", "paging"],
         vars: {},
         op: ({ target = fitted } = {}) => animateTo(target),
       },
@@ -200,7 +202,15 @@ const lightbox = (() => {
   const tile = (offset = 0) => photoGrid.tiles[wrap(index + offset)];
   const previewUrl = img => img.currentSrc || img.src;
   const pullDistance = (h = stageBox.h) => Math.max(1, Math.round(h * .65));
-  const pullScaleFor = (pull, span = pullDistance()) => clamp(1 - .85 * clamp(pull / span, 0, 1), .15, 1);
+  function minScale() {
+    if (cache.synced !== index) syncGrid();
+    return stageBox.minScale;
+  }
+  const dismissThreshold = () => Math.max(params.dismissScale, Math.min(.96, minScale() + .04));
+  function pullScaleFor(pull, span = pullDistance()) {
+    const min = minScale();
+    return clamp(1 - (1 - min) * clamp(pull / span, 0, 1), min, 1);
+  }
 
   function measureStage() {
     const r = stage.getBoundingClientRect();
@@ -214,7 +224,11 @@ const lightbox = (() => {
     if (!stageBox.w || !stageBox.h) measureStage();
     const { w, h } = stageBox;
     const width = Math.min(w, h * aspect) * zoom, height = width / aspect;
-    return { w, h, width, height, limitX: Math.max(0, (width - w) / 2), limitY: Math.max(0, (height - h) / 2) };
+    return {
+      w, h, width, height,
+      limitX: zoom > 1 ? Math.max(0, (width - w) / 2) : 0,
+      limitY: zoom > 1 ? Math.max(0, (height - h) / 2) : 0,
+    };
   }
 
   function syncGrid(force = false) {
@@ -225,6 +239,10 @@ const lightbox = (() => {
     stageBox.tileAnchor = r && r.width && r.height
       ? { x: clamp(r.left + r.width / 2 - stageBox.left, 0, stageBox.w), y: clamp(r.top + r.height / 2 - stageBox.top, 0, stageBox.h) }
       : null;
+    const fit = r && r.width && r.height ? geometry(1) : null;
+    stageBox.minScale = fit && fit.width && fit.height
+      ? clamp(Math.min(r.width / fit.width, r.height / fit.height), .05, .95)
+      : .15;
     const img = tile().firstElementChild;
     if (img) {
       img.loading = "eager";
@@ -277,7 +295,7 @@ const lightbox = (() => {
     const { w, h, width, height } = geometry();
     if (!w || !h) return;
     const { x, y, zoom, page, pull, fade } = view;
-    const shrinking = pull > 0 && zoom >= 1 && !page && width && height;
+    const shrinking = pull > 0 && zoom >= 1 && width && height;
     const pullScale = shrinking ? pullScaleFor(pull, pullDistance(h)) : 1;
     const effectiveScale = Math.min(zoom, pullScale);
     const shade = clamp(1 - Math.max(fade, 1.6 * (1 - effectiveScale)), 0, 1);
@@ -290,7 +308,7 @@ const lightbox = (() => {
 
     if (shrinking) {
       const [ax, ay] = pullOrigin(w, h);
-      renderSlide(slides[1], width, height, ax + ((w - width) / 2 + x - ax) * pullScale, ay + ((h - height) / 2 + y - ay) * pullScale, pullScale);
+      renderSlide(slides[1], width, height, ax + ((w - width) / 2 + x + page - ax) * pullScale, ay + ((h - height) / 2 + y - ay) * pullScale, pullScale);
     } else {
       renderSlide(slides[1], width, height, (w - width) / 2 + x + page, (h - height) / 2 + y);
     }
@@ -387,7 +405,7 @@ const lightbox = (() => {
 
   function finishPinch(animate) {
     if (!isOpen() || input.pointers.size) return;
-    if (view.zoom < params.dismissScale) transition("dismiss");
+    if (view.zoom < dismissThreshold()) transition("dismiss");
     else if (view.zoom < 1) transition("bounce", { target: fitted });
     else if (view.zoom === 1) transition("fit", { animate: false });
     else if (animate) animateTo(withinPhoto());
@@ -417,14 +435,32 @@ const lightbox = (() => {
     slide.index = position;
     slide.ratio = Number(thumb.getAttribute("width")) / Number(thumb.getAttribute("height"));
     slide.full = false;
+    slide.loading = -1;
     slide.element.replaceChildren(image);
     if (preload) image.decode().catch(() => {});
   }
 
+  function prewarmLowRes(center, dir) {
+    const count = photoGrid.tiles.length;
+    if (count <= 3) return;
+    const offsets = dir ? [dir * 2, dir * 3] : [2, -2, 3];
+    for (const off of offsets) {
+      const thumb = photoGrid.tiles[wrap(center + off)].firstElementChild;
+      const src = thumb && previewUrl(thumb);
+      if (!src || warmed.has(src)) continue;
+      warmed.add(src);
+      const img = new Image();
+      img.decoding = "async";
+      img.src = src;
+      img.decode?.().catch(() => {});
+    }
+  }
+
   async function upgradeSlide(slide, position, showError = false) {
-    if (slide.index !== position || slide.full) return true;
+    if (slide.index !== position || slide.full || slide.loading === position) return true;
     const link = photoGrid.tiles[position], thumb = link.firstElementChild;
     const full = new Image();
+    slide.loading = position;
     if (showError) pending = full;
     full.alt = thumb.alt;
     full.draggable = false;
@@ -443,12 +479,27 @@ const lightbox = (() => {
     } catch {
       if (showError && pending === full) notice.textContent = "Couldn’t load the full-size photograph.";
       return false;
+    } finally {
+      if (slide.loading === position) slide.loading = -1;
     }
   }
 
-  async function openPhoto(position, step = 0) {
+  async function runUpgrades(active, pos) {
+    if (!dialog.open || state === "closing" || active !== slides[1] || active.index !== pos) return;
+    if (!active.full) await upgradeSlide(active, pos, true);
+    // Pre-upgrade adjacent slides to full-res once the current photo is ready so swipes
+    // land directly on an already-composited full-res layer with zero post-settle swap.
+    if (dialog.open && state !== "closing" && photoGrid.tiles.length > 1 && active === slides[1] && active.index === pos) {
+      upgradeSlide(slides[2], slides[2].index);
+      upgradeSlide(slides[0], slides[0].index);
+    }
+  }
+
+  function openPhoto(position, step = 0) {
     if (state === "closing") return;
     cancelAnimationFrame(animation);
+    clearTimeout(upgradeTimer);
+    upgradeTimer = 0;
     resetTrackInput();
     input.pointers.clear();
     input.lastTap = null;
@@ -463,6 +514,7 @@ const lightbox = (() => {
     if (count > 1) {
       loadSlide(slides[0], wrap(index - 1), true);
       loadSlide(slides[2], wrap(index + 1), true);
+      prewarmLowRes(index, step);
     }
     for (let i = 0; i < slides.length; i++) slides[i].element.classList.toggle("current", i === 1);
     const link = tile(), thumb = link.firstElementChild, active = slides[1];
@@ -485,20 +537,22 @@ const lightbox = (() => {
     if (active.full) {
       pending = null;
       mapImg.src = link.href;
-    } else {
-      await upgradeSlide(active, index, true);
     }
-    // Pre-upgrade adjacent slides to full-res once the current photo is ready so one-finger
-    // swipes land directly on an already-composited full-res layer with zero post-settle swap.
-    if (dialog.open && state !== "closing" && count > 1 && active === slides[1] && active.index === index) {
-      upgradeSlide(slides[2], slides[2].index);
-      upgradeSlide(slides[0], slides[0].index);
-    }
+    // Debounce full-res decodes on rapid turns so blast-swiping never starves the image decoder.
+    if (opening) runUpgrades(active, index);
+    else upgradeTimer = setTimeout(() => { upgradeTimer = 0; runUpgrades(active, index); }, 90);
   }
 
   function runDismiss() {
     if (!dialog.open) return;
     cancelAnimationFrame(animation);
+    clearTimeout(upgradeTimer);
+    upgradeTimer = 0;
+    const now = performance.now();
+    if (view.pull > 0 || (input.trackMeta && input.trackMeta.wheelPull > 0)) {
+      input.absorbUntil = Math.max(input.absorbUntil, now + 1800);
+      input.lastAbsorbed = now;
+    }
     resetTrackInput();
     track.style.overflow = "hidden";
     input.pointers.clear();
@@ -509,6 +563,7 @@ const lightbox = (() => {
     if (!from.width || !from.height || !to.width || !to.height) {
       tile().classList.remove("in-viewer");
       emitToggle(false);
+      if (input.absorbUntil) input.lastAbsorbed = performance.now();
       return dialog.close();
     }
     const startShade = cache.shade ?? 1;
@@ -537,27 +592,37 @@ const lightbox = (() => {
         // so neither the photo nor the top bar can flash or drop --tuner-h to 0px.
         tile().classList.remove("in-viewer");
         emitToggle(false);
-        requestAnimationFrame(() => requestAnimationFrame(() => dialog.close()));
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          if (input.absorbUntil) input.lastAbsorbed = performance.now();
+          dialog.close();
+        }));
       },
     );
   }
 
   function finishClose() {
+    clearTimeout(upgradeTimer);
+    upgradeTimer = 0;
     resetTrackInput();
     track.style.overflow = "";
-    if (input.absorbUntil) input.lastAbsorbed = performance.now();
+    if (input.absorbUntil) {
+      const now = performance.now();
+      input.absorbUntil = Math.max(input.absorbUntil, now + 1500);
+      input.lastAbsorbed = now;
+    }
     pending = input.trackMeta = input.axis = null;
     input.scrolled = false;
     input.lastWheel = 0;
     stageBox.w = stageBox.h = 0;
     stageBox.cursor = stageBox.tileAnchor = null;
+    stageBox.minScale = .15;
     cache.synced = -1;
     cache.layoutKey = "";
     cache.shade = cache.zoomed = cache.mapHidden = null;
     telemetry.scale = 1;
     telemetry.page = 0;
     for (const s of slides) {
-      s.index = -1; s.full = s.clipped = false;
+      s.index = -1; s.full = s.clipped = false; s.loading = -1;
       s.w = s.h = 0; s.tx = s.ty = s.scale = NaN;
       s.element.style.cssText = "";
       s.element.replaceChildren();
@@ -579,10 +644,10 @@ const lightbox = (() => {
     return { x: x - stageBox.left - stageBox.w / 2, y: y - stageBox.top - stageBox.h / 2, spread: Math.sqrt(sq / input.pointers.size) };
   }
 
-  function rebase() {
+  function rebase(fresh = false) {
     input.gesture.start = input.gesture.last = measurePointers();
     input.gesture.baseline = { ...view };
-    input.gesture.axis = view.page ? "x" : view.pull ? "y" : null;
+    input.gesture.axis = fresh ? null : (view.page ? "x" : view.pull ? "y" : null);
   }
 
   function moveOnMap(event) {
@@ -599,7 +664,18 @@ const lightbox = (() => {
     view.x = clamp(x, Math.min(view.x, -limitX), Math.max(view.x, limitX));
     view.y = clamp(y, Math.min(view.y, -limitY), Math.max(view.y, limitY));
     if (horiz && photoGrid.tiles.length > 1) view.page = clamp(x - view.x, -w, w);
-    if (!horiz) view.pull = clamp(y - view.y, 0, pullDistance(h));
+    if (!horiz) {
+      view.pull = clamp(y - view.y, 0, pullDistance(h));
+      if (view.page) view.page = Math.abs(view.page) < 1 ? 0 : view.page * .72;
+    }
+  }
+
+  function recordSample(history, time, page, pull) {
+    let drop = 0;
+    while (drop < history.length && time - history[drop][0] >= 100) drop++;
+    if (drop) history.splice(0, drop);
+    if (history.length >= 16) history.shift();
+    history.push([time, page, pull]);
   }
 
   function project(history, now, value, slot) {
@@ -630,7 +706,7 @@ const lightbox = (() => {
       input.gesture.tap = input.gesture.onMap = false;
       input.lastTap = null;
     }
-    rebase();
+    rebase(input.pointers.size === 1);
     input.gesture.history = [[event.timeStamp, view.page, view.pull]];
   };
 
@@ -643,7 +719,7 @@ const lightbox = (() => {
       moveOnMap(event);
     } else if (input.pointers.size > 1) {
       const zoom = g.start.spread ? g.baseline.zoom * point.spread / g.start.spread : g.baseline.zoom;
-      scaleAt(clamp(zoom, .15, params.maxZoom), g.start, point, g.baseline);
+      scaleAt(clamp(zoom, minScale(), params.maxZoom), g.start, point, g.baseline);
       if (!g.start.spread && point.spread) rebase();
       syncZoomState();
     } else {
@@ -654,12 +730,11 @@ const lightbox = (() => {
       }
       g.tap = false;
       dragBy(point.x - last.x, point.y - last.y, g.axis);
-      if (view.page) transition("swipe");
-      else if (view.pull) transition("pull");
+      if (g.axis === "y" && view.pull) transition("pull");
+      else if (g.axis === "x" && view.page) transition("swipe");
     }
     g.last = point;
-    g.history = g.history.filter(([time]) => event.timeStamp - time < 100);
-    g.history.push([event.timeStamp, view.page, view.pull]);
+    recordSample(g.history, event.timeStamp, view.page, view.pull);
     draw();
   };
 
@@ -677,7 +752,7 @@ const lightbox = (() => {
         input.lastTap = { time: event.timeStamp, x: event.clientX, y: event.clientY };
         if (g.backdrop && view.zoom === 1) return transition("dismiss");
       } else input.lastTap = null;
-      if (view.zoom < params.dismissScale || (view.pull > 8 && project(g.history, event.timeStamp, view.pull, "pull") > stageBox.h * .2)) {
+      if (view.zoom < dismissThreshold() || (view.pull > 8 && project(g.history, event.timeStamp, view.pull, "pull") > stageBox.h * .2)) {
         return transition("dismiss");
       }
       const dir = Math.sign(view.page);
@@ -742,7 +817,7 @@ const lightbox = (() => {
     input.trackMeta = {
       w, h, limitX, limitY, padX, pullSpan, pullSpace, hasNeighbors, free, both, swipeSpeed, pullSpeed,
       originX, originY, left: track.scrollLeft, top: track.scrollTop,
-      lastSl: track.scrollLeft, lastSt: track.scrollTop, snapFrames: 0, wheelPull: 0,
+      lastSl: track.scrollLeft, lastSt: track.scrollTop, wheelPull: 0,
     };
     input.axis = null;
     input.scrolled = false;
@@ -765,65 +840,31 @@ const lightbox = (() => {
     const remX = hasNeighbors ? dx - x : 0, remY = Math.max(0, dy - y);
     const rawPage = hasNeighbors ? clamp(remX * swipeSpeed, -w, w) : 0;
     const rawPull = clamp(remY * pullSpeed, 0, pullSpan);
+    const now = performance.now();
+    const wheelActive = now - input.lastWheel < 45;
     if (!input.axis && (remX || remY)) {
       if (Math.hypot(remX, remY) >= 8) input.axis = Math.abs(remX) >= remY ? "x" : "y";
     } else if (input.axis === "y" && rawPull < 30 && Math.abs(remX) > remY * 2 && Math.abs(remX) > 24) {
       input.axis = "x";
+    } else if (input.axis === "x" && wheelActive && remY >= 32 && prevSt - st >= 4 && (prevSt - st) > Math.abs(sl - prevSl) * 1.5) {
+      input.axis = "y";
     } else if (input.axis && !remX && !remY) {
       input.axis = null;
     }
     const axis = input.axis || (Math.abs(remX) >= remY ? "x" : "y");
     view.x = x; view.y = y;
-    view.page = axis === "x" ? rawPage : 0;
+    view.page = axis === "x" ? rawPage : (view.page && Math.abs(view.page) >= 1 ? view.page * .72 : 0);
     view.pull = axis === "y" ? rawPull : 0;
-    const now = performance.now();
-    if (now - input.lastWheel < 45) meta.wheelPull = view.pull;
+    if (wheelActive) meta.wheelPull = view.pull;
     if (view.zoom <= 1) {
-      if (view.page && state !== "paging") transition("swipe");
-      else if (view.pull && state !== "pulling") transition("pull");
+      if (axis === "y" && view.pull) { if (state !== "pulling") transition("pull"); }
+      else if (axis === "x" && view.page) { if (state !== "paging") transition("swipe"); }
     }
     draw();
     if (axis === "y" && view.zoom <= 1 && (st <= 1 || rawPull >= pullSpan - 1)) {
       input.scrolled = false;
       input.axis = null;
-      input.absorbUntil = now + 1800;
-      input.lastAbsorbed = now;
       return void transition("dismiss");
-    }
-    // Native CSS scroll-snap animates after fingers lift with zero wheel events and can take ~1s
-    // on gentle bounces. Once 2 consecutive scroll frames arrive with no wheel input for >= 45ms,
-    // abort native snap and finish via JS settle/bounce/dismiss using the edge's max/min/curve/ease.
-    const snapAxisActive = axis === "x" ? !free : both;
-    if (snapAxisActive && view.zoom <= 1 && input.lastWheel > 0 && now - input.lastWheel >= 45) {
-      const dist = axis === "x" ? Math.abs(sl - originX) : Math.max(0, originY - st);
-      const prevDist = axis === "x" ? Math.abs(prevSl - originX) : Math.max(0, originY - prevSt);
-      const towardCenter = dist < prevDist;
-      const towardEdge = axis === "x" ? (dist > prevDist && dist > padX * .5) : (dist > prevDist);
-      if (towardCenter || towardEdge) {
-        if (++meta.snapFrames >= 2) {
-          track.style.scrollSnapType = "none";
-          track.scrollLeft = originX;
-          track.scrollTop = originY;
-          void track.scrollLeft;
-          track.style.scrollSnapType = "";
-          meta.left = meta.lastSl = track.scrollLeft;
-          meta.top = meta.lastSt = track.scrollTop;
-          meta.snapFrames = 0;
-          input.scrolled = false;
-          input.axis = null;
-          if (axis === "y") {
-            if (pullScaleFor(meta.wheelPull, pullSpan) < params.dismissScale) return void transition("dismiss");
-            return void transition("bounce", { target: withinPhoto() });
-          }
-          if (towardCenter) return void transition("settle", { target: withinPhoto() });
-          const dir = Math.sign(view.page);
-          if (dir) return void transition("settle", { step: -dir, target: { page: dir * w, pull: 0 } });
-        }
-      } else if (dist !== prevDist) {
-        meta.snapFrames = 0;
-      }
-    } else {
-      meta.snapFrames = 0;
     }
     if (!hasScrollEnd) {
       clearTimeout(input.scrollTimer);
@@ -837,13 +878,15 @@ const lightbox = (() => {
     if (!dialog.open || !isOpen() || input.pointers.size || input.pinch || input.wheelPinching || !meta || !input.scrolled) return;
     const { w, padX, pullSpan, hasNeighbors, free, both } = meta;
     const sl = track.scrollLeft, st = track.scrollTop, axis = input.axis;
+    meta.left = meta.lastSl = sl;
+    meta.top = meta.lastSt = st;
     input.scrolled = false;
     input.axis = null;
     if (axis === "y") {
-      const releasePull = input.lastWheel > 0 ? meta.wheelPull : view.pull;
-      if (pullScaleFor(releasePull, pullSpan) < params.dismissScale) return transition("dismiss");
-      if (!free && hasNeighbors && sl >= padX * 2 - 2) return transition("settle", { step: 1, immediate: true });
-      if (!free && hasNeighbors && sl <= 2) return transition("settle", { step: -1, immediate: true });
+      const releasePull = both && input.lastWheel > 0 ? meta.wheelPull : view.pull;
+      if (pullScaleFor(releasePull, pullSpan) < dismissThreshold()) return transition("dismiss");
+      if (!view.pull && !free && hasNeighbors && sl >= padX * 2 - 2) return transition("settle", { step: 1, immediate: true });
+      if (!view.pull && !free && hasNeighbors && sl <= 2) return transition("settle", { step: -1, immediate: true });
       return transition("bounce", { target: withinPhoto() });
     }
     if (!free && hasNeighbors) {
@@ -865,12 +908,17 @@ const lightbox = (() => {
   window.addEventListener?.("wheel", event => {
     if (!input.absorbUntil) return;
     const now = performance.now();
-    if (now > input.absorbUntil || now - input.lastAbsorbed > 120 || event.deltaY >= 0) {
+    if (dialog.open) {
+      input.lastAbsorbed = now;
+      if (state === "closing" && event.cancelable) event.preventDefault();
+      return;
+    }
+    if (now > input.absorbUntil || now - input.lastAbsorbed > 120 || event.deltaY > 0) {
       input.absorbUntil = 0;
       return;
     }
     input.lastAbsorbed = now;
-    if (!dialog.open && event.cancelable) event.preventDefault();
+    if (event.cancelable) event.preventDefault();
   }, { passive: false });
 
   stage.addEventListener("wheel", event => {
@@ -889,9 +937,14 @@ const lightbox = (() => {
       }
       const gap = now - input.lastWheel, meta = input.trackMeta;
       input.lastWheel = now;
-      if (event.cancelable && gap >= 80 && input.scrolled && meta && !meta.free && meta.hasNeighbors && input.axis !== "y") {
-        if (track.scrollLeft >= meta.padX * 2 - 4 && event.deltaX > 0) return void transition("settle", { step: 1, immediate: true });
-        if (track.scrollLeft <= 4 && event.deltaX < 0) return void transition("settle", { step: -1, immediate: true });
+      if (event.cancelable && input.scrolled && meta && !meta.free && meta.hasNeighbors && input.axis !== "y") {
+        const pullDown = event.deltaY < 0 && -event.deltaY > Math.abs(event.deltaX) * 1.5;
+        if (track.scrollLeft >= meta.padX * 2 - 4 && (pullDown || (gap >= 80 && event.deltaX > 0))) {
+          return void transition("settle", { step: 1, immediate: true });
+        }
+        if (track.scrollLeft <= 4 && (pullDown || (gap >= 80 && event.deltaX < 0))) {
+          return void transition("settle", { step: -1, immediate: true });
+        }
       }
       return;
     }
@@ -905,7 +958,7 @@ const lightbox = (() => {
     const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? stageBox.h : 1;
     const factor = (event.ctrlKey && event.deltaMode === 0 ? .01 : .004) * params.zoomSpeed;
     const anchor = stagePoint(event);
-    scaleAt(clamp(view.zoom * Math.exp(-event.deltaY * unit * factor), event.ctrlKey ? .15 : 1, params.maxZoom), anchor, anchor);
+    scaleAt(clamp(view.zoom * Math.exp(-event.deltaY * unit * factor), event.ctrlKey ? minScale() : 1, params.maxZoom), anchor, anchor);
     if (view.zoom >= 1) Object.assign(view, withinPhoto());
     syncZoomState();
     draw();
@@ -922,7 +975,7 @@ const lightbox = (() => {
   stage.addEventListener("gesturechange", event => {
     event.preventDefault();
     if (!input.pinch || !isOpen() || input.pointers.size) return;
-    scaleAt(clamp(input.pinch.baseline.zoom * event.scale, .15, params.maxZoom), input.pinch.start, stagePoint(event), input.pinch.baseline);
+    scaleAt(clamp(input.pinch.baseline.zoom * event.scale, minScale(), params.maxZoom), input.pinch.start, stagePoint(event), input.pinch.baseline);
     if (view.zoom >= 1) Object.assign(view, withinPhoto());
     syncZoomState();
     draw();
