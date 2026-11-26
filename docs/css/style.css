@@ -63,12 +63,10 @@ dialog::backdrop { background: transparent; overflow: hidden; overscroll-behavio
   scroll-snap-type: x mandatory;
   scrollbar-width: none;
 }
-.track.snap-both { scroll-snap-type: both mandatory; }
 .track.free { scroll-snap-type: none; }
 .track::-webkit-scrollbar { display: none; }
 .track-space { position: relative; }
 .snap { position: absolute; pointer-events: none; scroll-snap-align: start; scroll-snap-stop: always; }
-.track.snap-both .snap { scroll-snap-align: start start; }
 .viewport { position: sticky; top: 0; left: 0; width: var(--w, 100%); height: var(--h, 100%); overflow: hidden; contain: layout style; }
 .frame { position: absolute; inset: 0 auto auto 0; transform-origin: 0 0; will-change: transform; contain: layout style; }
 .frame:not(.current) { pointer-events: none; }

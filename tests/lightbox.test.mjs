@@ -18,8 +18,6 @@ import {
 
 test("state machine: legal transitions across all 6 states, illegal inputs are no-ops, clean cancel and reopen", () => {
   const e = createSimulator({ w: 1200, h: 800 });
-  const trace = [];
-  e.lightbox.onState((s, edge) => trace.push(`${edge}->${s}`));
 
   // Closed state: keyboard, wheel, pointer, and double-click are pure no-ops
   assert.equal(e.lightbox.state, "closed");
@@ -28,56 +26,55 @@ test("state machine: legal transitions across all 6 states, illegal inputs are n
   e.stage.dispatch("pointerdown", { pointerId: 1, button: 0, clientX: 600, clientY: 400, target: e.stage });
   e.stage.dispatch("dblclick");
   assert.equal(e.lightbox.state, "closed");
-  assert.equal(trace.length, 0);
-
-  // setVar rejects invalid values and clamps ranges
-  assert.equal(e.lightbox.setVar("unknownKey", 1), false);
-  assert.equal(e.lightbox.setVar("swipeSpeed", NaN), false);
-  assert.equal(e.lightbox.setVar("swipeSpeed", Infinity), false);
-  assert.equal(e.lightbox.setVar("snapAxis", "invalid"), false);
-  assert.equal(e.lightbox.setVar("swipeSpeed", 999), true);
-  assert.equal(e.lightbox.config.swipeSpeed, 4);
-  e.lightbox.resetVars();
-  assert.equal(e.lightbox.config.swipeSpeed, e.lightbox.defaults.swipeSpeed);
+  assert.equal(e.lightbox.lastEdge, null);
 
   // Open -> viewing -> paging -> viewing -> pulling -> viewing -> zoomed -> viewing -> closing -> closed
   e.open(0);
   e.advance(32);
   assert.equal(e.lightbox.state, "viewing");
+  assert.equal(e.lightbox.lastEdge, "open");
 
-  const startL = e.track.scrollLeft, startT = e.track.scrollTop;
+  const startL = e.track.scrollLeft;
   e.track.scrollLeft = startL + 100;
   e.track.dispatch("scroll");
   assert.equal(e.lightbox.state, "paging");
+  assert.equal(e.lightbox.lastEdge, "swipe");
   e.track.scrollLeft = startL * 2;
   e.track.dispatch("scroll");
   e.track.dispatch("scrollend");
   e.advance(32);
   assert.equal(e.lightbox.state, "viewing");
+  assert.equal(e.lightbox.lastEdge, "settle");
   assert.equal(e.currentFrame().firstElementChild.alt, "Photo 1");
 
   e.track.scrollTop = e.track.scrollTop - 40;
   e.track.dispatch("scroll");
   assert.equal(e.lightbox.state, "pulling");
+  assert.equal(e.lightbox.lastEdge, "pull");
   e.track.dispatch("scrollend");
   e.advance(200);
   assert.equal(e.lightbox.state, "viewing");
+  assert.equal(e.lightbox.lastEdge, "bounce");
 
   e.dialog.dispatch("keydown", { key: "+" });
   assert.equal(e.lightbox.state, "zoomed");
+  assert.equal(e.lightbox.lastEdge, "zoom");
   e.dialog.dispatch("keydown", { key: "0" });
   e.advance(200);
   assert.equal(e.lightbox.state, "viewing");
+  assert.equal(e.lightbox.lastEdge, "fit");
 
   // Dismiss from viewing enters closing; inputs during closing are ignored
   e.dialog.dispatch("cancel");
   assert.equal(e.lightbox.state, "closing");
+  assert.equal(e.lightbox.lastEdge, "dismiss");
   e.dialog.dispatch("keydown", { key: "ArrowRight" });
   e.dialog.dispatch("keydown", { key: "+" });
   e.stage.dispatch("pointerdown", { pointerId: 1, button: 0, clientX: 600, clientY: 400, target: e.currentFrame() });
   assert.equal(e.lightbox.state, "closing");
   e.advance(420);
   assert.equal(e.lightbox.state, "closed");
+  assert.equal(e.lightbox.lastEdge, "finish");
 
   // Dismiss works cleanly from paging, pulling, and zoomed, and reopening starts fresh
   for (const setup of [
@@ -101,14 +98,6 @@ test("state machine: legal transitions across all 6 states, illegal inputs are n
     e.dialog.dispatch("cancel");
     e.advance(420);
   }
-
-  for (const expected of [
-    "open->viewing", "swipe->paging", "settle->viewing",
-    "pull->pulling", "bounce->viewing", "zoom->zoomed",
-    "fit->viewing", "dismiss->closing", "finish->closed",
-  ]) {
-    assert.ok(trace.includes(expected), `Expected transition ${expected}`);
-  }
 });
 
 test("geometry precision: portrait, square, ultrawide, and fractional viewports stay snapped (not .free) at zoom=1", () => {
@@ -126,20 +115,17 @@ test("geometry precision: portrait, square, ultrawide, and fractional viewports 
     e.advance(32);
     for (let i = 0; i < dims.length; i++) {
       assert.equal(e.track.classList.contains("free"), false, `Tile ${i} (${dims[i]}) at ${vw}x${vh} must not drop into .free`);
-      assert.equal(e.lightbox.config.snapAxis, "x");
       e.dialog.dispatch("keydown", { key: "ArrowRight" });
       e.advance(16);
     }
   }
 });
 
-test("snap modes (x, both, none) and live config updates resize track cleanly without overlapping snap areas", () => {
+test("snap track places 3 non-overlapping horizontal snap areas and disables snap when zoomed", () => {
   const e = createSimulator({ w: 1200, h: 800 });
   e.open(0);
   e.advance(32);
-  assert.equal(e.lightbox.config.snapAxis, "x");
   assert.equal(e.track.classList.contains("free"), false);
-  assert.equal(e.track.classList.contains("snap-both"), false);
   const snaps = e.trackSpace.querySelectorAll(".snap");
   assert.equal(snaps.length, 3);
   assert.equal(parseFloat(snaps[0].style.left), 0);
@@ -149,49 +135,25 @@ test("snap modes (x, both, none) and live config updates resize track cleanly wi
   assert.equal(parseFloat(snaps[2].style.left), 1200);
   assert.equal(parseFloat(snaps[1].style.top), 0);
 
-  e.lightbox.setConfig({ snapAxis: "both", swipeSpeed: 1.5 });
-  assert.equal(e.track.classList.contains("snap-both"), true);
-  assert.ok(parseFloat(snaps[1].style.top) > 0);
-  assert.equal(parseFloat(snaps[1].style.left), 800);
-
-  e.lightbox.setConfig({ snapAxis: "none" });
+  e.dialog.dispatch("keydown", { key: "+" });
   assert.equal(e.track.classList.contains("free"), true);
   assert.equal(snaps[0].hidden, true);
 });
 
-test("math atoms: 7 pull anchors (zero reflow), linear/log curves, minMs floor, and reduced motion", () => {
+test("math atoms: cursor pull anchor (zero reflow), scaled linear dismiss, minMs floor, and reduced motion", () => {
   const e = createSimulator({ w: 1000, h: 800 });
   e.open(0);
   e.advance(32);
   const startT = e.track.scrollTop;
-  const pullToHalf = anchor => {
-    e.lightbox.setVar("pullAnchor", anchor);
-    e.stage.dispatch("wheel", { deltaX: 0, deltaY: -8, deltaMode: 0, clientX: 850, clientY: 650, cancelable: false });
-    e.track.scrollTop = Math.round(startT * 0.4);
-    e.track.dispatch("scroll");
-    const { tx, ty, sx } = parseTransform(e.currentFrame().style.transform);
-    const bw = parseFloat(e.currentFrame().style.width), bh = parseFloat(e.currentFrame().style.height);
-    return { cx: tx + bw * sx / 2, cy: ty + bh * sx / 2 };
-  };
+  e.stage.dispatch("wheel", { deltaX: 0, deltaY: -8, deltaMode: 0, clientX: 850, clientY: 650, cancelable: false });
+  e.track.scrollTop = Math.round(startT * 0.4);
+  e.track.dispatch("scroll");
+  const { tx, ty, sx } = parseTransform(e.currentFrame().style.transform);
+  const bw = parseFloat(e.currentFrame().style.width), bh = parseFloat(e.currentFrame().style.height);
+  const cx = tx + bw * sx / 2, cy = ty + bh * sx / 2;
+  assert.ok(cx > 600 && cy > 450, "Pull shrinks toward cursor anchor");
 
-  const rCursor = pullToHalf("cursor");
-  const rTile = pullToHalf("tile");
-  const rCenter = pullToHalf("center");
-  const rLeft = pullToHalf("left");
-  const rRight = pullToHalf("right");
-  const rTop = pullToHalf("top");
-  const rBottom = pullToHalf("bottom");
-
-  assert.ok(rCursor.cx > 600 && rCursor.cy > 450);
-  assert.ok(rTile.cx < 400 && rTile.cy < 350);
-  assert.ok(Math.abs(rCenter.cx - 500) < 2 && Math.abs(rCenter.cy - 400) < 2);
-  assert.ok(rLeft.cx < rCenter.cx - 100 && Math.abs(rLeft.cy - 400) < 2);
-  assert.ok(rRight.cx > rCenter.cx + 100 && Math.abs(rRight.cy - 400) < 2);
-  assert.ok(rTop.cy < rCenter.cy - 100 && Math.abs(rTop.cx - 500) < 2);
-  assert.ok(rBottom.cy > rCenter.cy + 100 && Math.abs(rBottom.cx - 500) < 2);
-
-  // Tile anchor remains zero-reflow during 60fps pull frames
-  e.lightbox.setVar("pullAnchor", "tile");
+  // Cursor pull remains zero-reflow during 60fps pull frames
   const hot = e.measureHotPath(() => {
     for (let i = 1; i <= 100; i++) {
       e.track.scrollTop = Math.max(10, startT - i * 2);
@@ -202,40 +164,29 @@ test("math atoms: 7 pull anchors (zero reflow), linear/log curves, minMs floor, 
   assert.equal(hot.layoutReads, 0);
   assert.equal(hot.layoutWrites, 0);
 
-  // Linear vs log dismiss curves and dismissMinMs floor
-  const runCurve = (curve, minMs = 80) => {
-    const s = createSimulator();
-    s.open(0);
-    s.advance(32);
-    s.lightbox.setConfig({ dismissMaxMs: 400, dismissMinMs: minMs, dismissCurve: curve });
-    const ps = s.track.scrollTop;
-    s.track.scrollTop = Math.round(ps * (1 - 0.718)); // visualScale ~0.39 -> ratio 0.5
-    s.track.dispatch("scroll");
-    s.track.dispatch("scrollend");
-    return s;
-  };
-  const lin = runCurve("linear");
+  // Scaled linear dismiss from 50% size (~175ms) finishes cleanly by 240ms
+  const lin = createSimulator();
+  lin.open(0);
+  lin.advance(32);
+  const ps = lin.track.scrollTop;
+  lin.track.scrollTop = Math.round(ps * (1 - 0.718));
+  lin.track.dispatch("scroll");
+  lin.track.dispatch("scrollend");
   lin.advance(240);
-  assert.equal(lin.dialog.open, false, "Linear 50% size (~200ms) finishes by 240ms");
+  assert.equal(lin.dialog.open, false, "Linear 50% size dismiss finishes by 240ms");
 
-  const log = runCurve("log");
-  log.advance(240);
-  assert.equal(log.dialog.open, true, "Log 50% size (~296ms) still animating at 240ms");
-  log.advance(120);
-  assert.equal(log.dialog.open, false, "Log curve completes within 360ms");
-
+  // Min-size dismiss honors 70ms duration floor while holding open until release
   const floor = createSimulator();
   floor.open(0);
   floor.advance(32);
-  floor.lightbox.setConfig({ dismissMaxMs: 400, dismissMinMs: 180, dismissCurve: "linear" });
   floor.track.scrollTop = 0;
   floor.track.dispatch("scroll");
   assert.equal(floor.lightbox.state, "pulling", "Holds at min size while fingers stay down");
   floor.track.dispatch("scrollend");
   assert.equal(floor.lightbox.state, "closing", "Dismisses on release from min size");
-  floor.advance(120);
-  assert.equal(floor.dialog.open, true, "Honors dismissMinMs=180ms floor");
-  floor.advance(120);
+  floor.advance(48);
+  assert.equal(floor.dialog.open, true, "Honors MIN_MS=70ms floor");
+  floor.advance(80);
   assert.equal(floor.dialog.open, false);
 
   // Reduced motion closes immediately (2 rAFs)
@@ -920,55 +871,6 @@ test("hot path: zero forced reflows, layout reads/writes, or root --shade writes
   assert.equal(vRes.layoutWrites, 0);
   assert.equal(vRes.hiddenMapWrites, 0);
   assert.equal(vRes.transformWrites, 300);
-});
-
-test("modular lightbox-debug mounts cleanly, highlights active state/edge, reparents without close flicker, and unmounts completely", () => {
-  const prod = createSimulator();
-  assert.equal(prod.head.children.length, 0);
-  assert.equal(prod.body.firstElementChild, prod.dialog);
-
-  const e = createSimulator({ loadDebug: true });
-  const bar = e.body.firstElementChild;
-  assert.equal(bar.classList.contains("lb-debug"), true);
-  assert.equal(e.head.children.some(n => n.tagName === "STYLE"), true);
-  assert.equal(e.docEl.style.getPropertyValue("--lb-debug-h"), "235px");
-
-  const walk = (root, out = []) => { out.push(root); for (const c of root.children) walk(c, out); return out; };
-  const all = walk(bar);
-  const nodes = all.filter(n => n.classList.contains("sm-node"));
-  const edgeBars = all.filter(n => n.classList.contains("sm-edge-bar"));
-  assert.equal(nodes.length, e.lightbox.graph.nodes.length);
-  assert.equal(edgeBars.length, e.lightbox.graph.edges.length);
-
-  e.open(0);
-  e.advance(32);
-  assert.equal(e.dialog.firstElementChild, bar);
-  assert.equal(nodes.find(n => n.dataset.node === "viewing").classList.contains("active"), true);
-  assert.equal(edgeBars.find(n => n.dataset.edge === "open").classList.contains("active"), true);
-
-  const swipeSpeedInput = all.find(n => n.tagName === "INPUT" && n.getAttribute("aria-label") === "swipe speed");
-  swipeSpeedInput.value = "3.2";
-  swipeSpeedInput.dispatch("input");
-  assert.equal(e.lightbox.config.swipeSpeed, 3.2);
-
-  const buttons = all.filter(n => n.tagName === "BUTTON");
-  buttons.find(b => b.textContent === "Reset").dispatch("click");
-  assert.equal(e.lightbox.config.swipeSpeed, e.lightbox.defaults.swipeSpeed);
-
-  buttons.find(b => b.textContent === "Hide").dispatch("click");
-  assert.equal(bar.classList.contains("collapsed"), true);
-  assert.equal(e.docEl.style.getPropertyValue("--lb-debug-h"), "28px");
-
-  e.dialog.dispatch("cancel");
-  e.advance(420);
-  assert.equal(e.closeEvents[0].inViewer, false);
-  assert.equal(e.closeEvents[0].debugInBody, true);
-  assert.equal(e.closeEvents[0].debugH, "28px");
-
-  buttons.find(b => b.getAttribute("aria-label") === "Close debug graph").dispatch("click");
-  assert.equal(e.body.children.includes(bar), false);
-  assert.equal(e.head.children.length, 0);
-  assert.equal(e.docEl.style.getPropertyValue("--lb-debug-h"), "");
 });
 
 if (process.argv.includes("--bench")) {

@@ -5,7 +5,6 @@ import vm from "node:vm";
 import { performance } from "node:perf_hooks";
 
 export const LIGHTBOX_CODE = fs.readFileSync(path.resolve(import.meta.dirname, "../docs/js/lightbox.js"), "utf8");
-export const DEBUG_CODE = fs.readFileSync(path.resolve(import.meta.dirname, "../docs/js/lightbox-debug.js"), "utf8");
 
 export function parseTransform(tr) {
   let tx = 0, ty = 0, sx = 1, sy = 1;
@@ -21,7 +20,6 @@ export function createSimulator({
   h = 900,
   tileCount = 10,
   scrollY = 0,
-  loadDebug = false,
   reducedMotion = false,
   hasScrollEnd = true,
   decodeMode = "immediate", // "immediate" | "delayed" | "manual"
@@ -326,7 +324,6 @@ export function createSimulator({
   };
   vm.createContext(ctx);
   vm.runInContext(LIGHTBOX_CODE, ctx);
-  if (loadDebug) vm.runInContext(DEBUG_CODE, ctx);
   const lightbox = vm.runInContext("lightbox", ctx);
 
   function currentFrame() { return frames.find(f => f.classList.contains("current")) || frames[1]; }
@@ -362,7 +359,6 @@ export function createSimulator({
 
   function snapMode() {
     if (track.style.scrollSnapType === "none" || track.classList.contains("free")) return "none";
-    if (track.classList.contains("snap-both")) return "both";
     return "x";
   }
 

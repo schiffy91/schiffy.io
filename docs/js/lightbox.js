@@ -1,9 +1,9 @@
-// Lightbox viewer built as a graph-based state machine.
-// Nodes (states): closed, viewing, paging, pulling, zoomed, closing.
-// Edges (ops + live vars): open, swipe, settle, pull, bounce, dismiss, zoom, fit, finish.
-// Hot path: 3 persistent .frame slides rotated in place, cached stageBox, transforms-only draw().
+// Lightbox viewer: 6-state machine, 3 rotated GPU slides, native X scroll-snap + trackpad/touch gestures.
 
 const lightbox = (() => {
+  const SWIPE_SPEED = 2, PULL_SPEED = 1.5, DISMISS_SCALE = .78, MAX_ZOOM = 8;
+  const SETTLE_MS = 350, DISMISS_MS = 350, MIN_MS = 70, EASE = 3;
+
   const dialog = document.querySelector("dialog");
   const stage = dialog.querySelector(".stage");
   const track = stage.querySelector(".track");
@@ -28,9 +28,9 @@ const lightbox = (() => {
   const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
   const hasScrollEnd = "onscrollend" in window;
   const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
-  const fitted = { zoom: 1, x: 0, y: 0, page: 0, pull: 0, fade: 0 };
+  const fitted = { zoom: 1, x: 0, y: 0, page: 0, pull: 0 };
   const view = { ...fitted };
-  const stageBox = { left: 0, top: 0, w: 0, h: 0, cursor: null, tileAnchor: null, minScale: .15 };
+  const stageBox = { left: 0, top: 0, w: 0, h: 0, cursor: null, minScale: .15 };
   const cache = { synced: -1, layoutKey: "", shade: null, zoomed: null, mapHidden: null };
   const input = {
     pointers: new Map(), gesture: null, lastTap: null, pinch: null,
@@ -38,189 +38,69 @@ const lightbox = (() => {
     trackMeta: null, axis: null, scrolled: false, lastWheel: 0,
     absorbUntil: 0, lastAbsorbed: 0, inertia: null, ignoreSnapUntil: 0,
   };
-  const listeners = { state: new Set(), toggle: new Set() };
-  const telemetry = { drawUs: 0, scale: 1, page: 0 };
+  const telemetry = { scale: 1, page: 0 };
   const warmed = new Set();
+  const anims = [0, 0]; // [0] = main tween, [1] = horizontal page glide
 
-  let state = "closed", lastEdge = null, index = 0, pending = null, animation = 0, pageGlide = 0, upgradeTimer = 0;
+  let state = "closed", lastEdge = null, index = 0, pending = null, upgradeTimer = 0;
   const isOpen = () => state !== "closed" && state !== "closing";
-  const stopAnim = () => { cancelAnimationFrame(animation); animation = 0; };
-  const stopPageGlide = () => { cancelAnimationFrame(pageGlide); pageGlide = 0; };
+  const stopAnim = (slot = 0) => { cancelAnimationFrame(anims[slot]); anims[slot] = 0; };
+  const stopAll = () => { stopAnim(0); stopAnim(1); };
 
-  // --- Declarative State Graph (single source of truth for runtime + visualizer) ---
-
-  const numVar = (label, value, min, max, step, fmt) => ({ type: "range", label, value, default: value, min, max, step, fmt });
-  const optVar = (label, value, options) => ({ type: "select", label, value, default: value, options });
-  const curveOpts = [["linear", "linear"], ["log", "log"]];
-  const anchorOpts = [
-    ["cursor", "cursor"], ["tile", "grid tile"], ["center", "center"],
-    ["left", "left"], ["right", "right"], ["top", "top"], ["bottom", "bottom"],
-  ];
-
-  const graph = {
-    nodes: [
-      { id: "closed",  label: "Closed"  },
-      { id: "viewing", label: "Viewing" },
-      { id: "paging",  label: "Paging"  },
-      { id: "pulling", label: "Pulling" },
-      { id: "zoomed",  label: "Zoomed"  },
-      { id: "closing", label: "Closing" },
-    ],
-    edges: [
-      {
-        id: "open", from: "closed", to: "viewing", label: "open",
-        vars: {},
-        op: ({ position }) => openPhoto(position, 0),
-      },
-      {
-        id: "swipe", from: "viewing", to: "paging", label: "swipe",
-        allowFrom: ["viewing", "paging", "pulling"],
-        vars: {
-          swipeSpeed: numVar("speed", 2.0, .5, 4, .1, v => v.toFixed(1) + "x"),
-          snapAxis:   optVar("snap", "x", [["x", "X"], ["both", "X+Y"], ["none", "off"]]),
-        },
-      },
-      {
-        id: "settle", from: "paging", to: "viewing", label: "settle",
-        allowFrom: ["paging", "viewing"],
-        vars: {
-          settleMs:    numVar("max", 350, 80, 600, 10, v => Math.round(v) + "ms"),
-          settleMinMs: numVar("min", 70, 20, 250, 10, v => Math.round(v) + "ms"),
-          settleCurve: optVar("curve", "linear", curveOpts),
-          easePower:   numVar("ease", 3.0, 1.5, 5, .5, v => "^" + v.toFixed(1)),
-        },
-        op: ({ step = 0, target = null, immediate = false } = {}) => {
-          if (immediate && step) return openPhoto(index + step, step);
-          if (step) return animateTo(target, () => openPhoto(index + step, step));
-          if (target) return animateTo(target);
-          if (view.page || view.pull) { view.page = view.pull = 0; draw(); }
-          syncTrack();
-        },
-      },
-      {
-        id: "pull", from: "viewing", to: "pulling", label: "pull",
-        allowFrom: ["viewing", "pulling", "paging", "zoomed"],
-        vars: {
-          pullSpeed:  numVar("speed", 1.5, .5, 4, .1, v => v.toFixed(1) + "x"),
-          pullAnchor: optVar("anchor", "cursor", anchorOpts),
-        },
-      },
-      {
-        id: "bounce", from: "pulling", to: "viewing", label: "bounce",
-        allowFrom: ["pulling", "paging"],
-        vars: {},
-        op: ({ target = fitted } = {}) => {
-          stopPageGlide();
-          if (input.trackMeta && track.scrollLeft !== input.trackMeta.originX) {
-            track.scrollLeft = input.trackMeta.left = input.trackMeta.lastSl = input.trackMeta.originX;
-            input.ignoreSnapUntil = performance.now() + 260;
-          }
-          animateTo(target);
-        },
-      },
-      {
-        id: "dismiss", from: "pulling", to: "closing", label: "dismiss",
-        allowFrom: ["pulling", "viewing", "paging", "zoomed"],
-        vars: {
-          dismissScale: numVar("close@", .78, .4, .94, .02, v => Math.round(v * 100) + "%"),
-          dismissCurve: optVar("curve", "linear", curveOpts),
-          dismissMaxMs: numVar("max", 350, 80, 600, 10, v => Math.round(v) + "ms"),
-          dismissMinMs: numVar("min", 70, 20, 250, 10, v => Math.round(v) + "ms"),
-        },
-        op: () => runDismiss(),
-      },
-      {
-        id: "zoom", from: "viewing", to: "zoomed", label: "zoom",
-        allowFrom: ["viewing", "zoomed", "paging", "pulling"],
-        vars: {
-          zoomSpeed: numVar("speed", 1.0, .4, 2.5, .1, v => v.toFixed(1) + "x"),
-          maxZoom:   numVar("max", 8, 2, 12, 1, v => Math.round(v) + "x"),
-        },
-      },
-      {
-        id: "fit", from: "zoomed", to: "viewing", label: "fit",
-        allowFrom: ["zoomed", "viewing", "pulling"],
-        vars: {},
-        op: ({ animate = true } = {}) => {
-          resetTrackInput();
-          if (animate) return animateTo(fitted);
-          Object.assign(view, fitted);
-          draw();
-          syncTrack();
-        },
-      },
-      {
-        id: "finish", from: "closing", to: "closed", label: "close",
-        vars: {},
-        op: () => finishClose(),
-      },
-    ],
+  const EDGES = {
+    open:    ["viewing", ["closed"], ({ position }) => openPhoto(position, 0)],
+    swipe:   ["paging",  ["viewing", "paging", "pulling"]],
+    settle:  ["viewing", ["paging", "viewing"], ({ step = 0, target = null, immediate = false }) => {
+      if (immediate && step) return openPhoto(index + step, step);
+      if (step) return animateTo(target, () => openPhoto(index + step, step));
+      if (target) return animateTo(target);
+      if (view.page || view.pull) { view.page = view.pull = 0; draw(); }
+      syncTrack();
+    }],
+    pull:    ["pulling", ["viewing", "pulling", "paging", "zoomed"]],
+    bounce:  ["viewing", ["pulling", "paging"], ({ target = fitted }) => {
+      stopAnim(1);
+      const meta = input.trackMeta;
+      if (meta && track.scrollLeft !== meta.originX) {
+        track.scrollLeft = meta.left = meta.lastSl = meta.originX;
+        input.ignoreSnapUntil = performance.now() + 260;
+      }
+      animateTo(target);
+    }],
+    dismiss: ["closing", ["pulling", "viewing", "paging", "zoomed"], () => runDismiss()],
+    zoom:    ["zoomed",  ["viewing", "zoomed", "paging", "pulling"]],
+    fit:     ["viewing", ["zoomed", "viewing", "pulling"], ({ animate = true }) => {
+      resetTrackInput();
+      if (animate) return animateTo(fitted);
+      Object.assign(view, fitted);
+      draw();
+      syncTrack();
+    }],
+    finish:  ["closed",  ["closing"], () => finishClose()],
   };
 
-  const edgeById = new Map(graph.edges.map(e => [e.id, e]));
-  const params = {}, defaults = {}, varSpec = new Map();
-  for (const edge of graph.edges) {
-    for (const [key, spec] of Object.entries(edge.vars)) {
-      params[key] = spec.value;
-      defaults[key] = spec.default;
-      varSpec.set(key, spec);
-    }
-  }
-  Object.freeze(defaults);
-
-  const emitState = () => { for (const fn of listeners.state) fn(state, lastEdge); };
-  const emitToggle = open => { for (const fn of listeners.toggle) fn(open, dialog); };
-
-  function transition(edgeId, payload) {
-    const edge = edgeById.get(edgeId);
-    if (!edge || !(edge.allowFrom || [edge.from]).includes(state)) return false;
-    const changed = state !== edge.to || lastEdge !== edgeId;
-    state = edge.to;
+  function transition(edgeId, payload = {}) {
+    const edge = EDGES[edgeId];
+    if (!edge || !edge[1].includes(state)) return false;
+    state = edge[0];
     lastEdge = edgeId;
-    if (changed) emitState();
-    edge.op?.(payload || {});
+    edge[2]?.(payload);
     return true;
   }
-
-  function setVar(key, value) {
-    const spec = varSpec.get(key);
-    if (!spec) return false;
-    if (spec.type === "range") {
-      if (typeof value !== "number" || !Number.isFinite(value)) return false;
-      value = clamp(value, spec.min, spec.max);
-    } else if (!spec.options.some(([opt]) => opt === value)) {
-      return false;
-    }
-    spec.value = params[key] = value;
-    if (dialog.open && state !== "closing") {
-      if (key === "maxZoom" && view.zoom > params.maxZoom) {
-        view.zoom = params.maxZoom;
-        Object.assign(view, withinPhoto());
-      }
-      draw();
-      if (!input.pointers.size && !input.pinch && !input.wheelPinching) syncTrack();
-    }
-    return true;
-  }
-
-  const setConfig = patch => Object.entries(patch).reduce((ok, [k, v]) => setVar(k, v) || ok, false);
-  const resetVars = () => setConfig(defaults);
 
   // --- Pure-GPU layout, rendering & tween engine ---
 
   const wrap = pos => ((pos % photoGrid.tiles.length) + photoGrid.tiles.length) % photoGrid.tiles.length;
   const tile = (offset = 0) => photoGrid.tiles[wrap(index + offset)];
   const previewUrl = img => img.currentSrc || img.src;
+  const makeImg = (src, alt = "", decoding = "sync") => Object.assign(new Image(), { alt, draggable: false, decoding, src });
   const pullDistance = (h = stageBox.h) => Math.max(1, Math.round(h * .65));
-  function minScale() {
-    if (cache.synced !== index) syncGrid();
-    return stageBox.minScale;
-  }
-  const dismissThreshold = () => Math.max(params.dismissScale, Math.min(.96, minScale() + .04));
-  function pullScaleFor(pull, span = pullDistance()) {
+  const minScale = () => (cache.synced !== index && syncGrid(), stageBox.minScale);
+  const dismissThreshold = () => Math.max(DISMISS_SCALE, Math.min(.96, minScale() + .04));
+  const pullScaleFor = (pull, span = pullDistance()) => {
     const min = minScale();
     return clamp(1 - (1 - min) * clamp(pull / span, 0, 1), min, 1);
-  }
+  };
 
   function measureStage() {
     const r = stage.getBoundingClientRect();
@@ -246,19 +126,12 @@ const lightbox = (() => {
     cache.synced = index;
     photoGrid.select(index);
     const r = stageBox.w && stageBox.h ? tile()?.getBoundingClientRect() : null;
-    stageBox.tileAnchor = r && r.width && r.height
-      ? { x: clamp(r.left + r.width / 2 - stageBox.left, 0, stageBox.w), y: clamp(r.top + r.height / 2 - stageBox.top, 0, stageBox.h) }
-      : null;
-    const fit = r && r.width && r.height ? geometry(1) : null;
-    stageBox.minScale = fit && fit.width && fit.height
+    const fit = r?.width && r?.height ? geometry(1) : null;
+    stageBox.minScale = fit?.width && fit?.height
       ? clamp(Math.min(r.width / fit.width, r.height / fit.height), .05, .95)
       : .15;
     const img = tile().firstElementChild;
-    if (img) {
-      img.loading = "eager";
-      img.decoding = "sync";
-      img.decode?.().catch(() => {});
-    }
+    if (img) { img.loading = "eager"; img.decoding = "sync"; img.decode?.().catch(() => {}); }
   }
 
   function trackCursor(event) {
@@ -269,33 +142,14 @@ const lightbox = (() => {
     };
   }
 
-  function pullOrigin(w, h) {
-    const c = stageBox.cursor, t = stageBox.tileAnchor;
-    switch (params.pullAnchor) {
-      case "tile":   return t ? [clamp(t.x, 0, w), clamp(t.y, 0, h)] : [w / 2, h / 2];
-      case "center": return [w / 2, h / 2];
-      case "left":   return [0, h / 2];
-      case "right":  return [w, h / 2];
-      case "top":    return [w / 2, 0];
-      case "bottom": return [w / 2, h];
-      default:       return c ? [clamp(c.x, 0, w), clamp(c.y, 0, h)] : [w / 2, h / 2];
-    }
-  }
-
   function renderSlide(slide, width, height, tx, ty, scale = 1, opacity = 1) {
     const s = slide.element.style;
     if (slide.w !== width || slide.h !== height) {
       slide.w = width; slide.h = height;
       s.width = width + "px"; s.height = height + "px";
     }
-    if (slide.clipped) {
-      slide.clipped = false;
-      s.overflow = s.borderRadius = "";
-    }
-    if (slide.opacity !== opacity) {
-      slide.opacity = opacity;
-      s.opacity = opacity === 1 ? "" : String(opacity);
-    }
+    if (slide.clipped) { slide.clipped = false; s.overflow = s.borderRadius = ""; }
+    if (slide.opacity !== opacity) { slide.opacity = opacity; s.opacity = opacity === 1 ? "" : String(opacity); }
     if (slide.tx !== tx || slide.ty !== ty || slide.scale !== scale) {
       slide.tx = tx; slide.ty = ty; slide.scale = scale;
       s.transform = scale === 1
@@ -304,58 +158,51 @@ const lightbox = (() => {
     }
   }
 
+  const lerp = (a, b, t) => a + (b - a) * t;
+
   function draw() {
-    const t0 = performance.now();
     const { w, h, width, height } = geometry();
     if (!w || !h) return;
-    const { x, y, zoom, page, pull, fade } = view;
+    const { x, y, zoom, page, pull } = view;
     const shrinking = pull > 0 && zoom >= 1 && width && height;
     const pullScale = shrinking ? pullScaleFor(pull, pullDistance(h)) : 1;
     const effectiveScale = Math.min(zoom, pullScale);
-    const shade = clamp(1 - Math.max(fade, 1.6 * (1 - effectiveScale)), 0, 1);
+    const shade = clamp(1 - 1.6 * (1 - effectiveScale), 0, 1);
     if (shade < 1) syncGrid();
 
-    const leftW = Math.min(w, h * slides[0].ratio), leftH = leftW / slides[0].ratio;
-    const rightW = Math.min(w, h * slides[2].ratio), rightH = rightW / slides[2].ratio;
     const neighborAlpha = shrinking ? clamp((pullScale - dismissThreshold()) / Math.max(.05, 1 - dismissThreshold()), 0, 1) : 1;
-    renderSlide(slides[0], leftW, leftH, (w - leftW) / 2 + (page > 0 ? page - w : -w), (h - leftH) / 2, 1, neighborAlpha);
-    renderSlide(slides[2], rightW, rightH, (w - rightW) / 2 + (page < 0 ? page + w : w), (h - rightH) / 2, 1, neighborAlpha);
+    for (const [s, off] of [[slides[0], page > 0 ? page - w : -w], [slides[2], page < 0 ? page + w : w]]) {
+      const sw = Math.min(w, h * s.ratio), sh = sw / s.ratio;
+      renderSlide(s, sw, sh, (w - sw) / 2 + off, (h - sh) / 2, 1, neighborAlpha);
+    }
 
     if (shrinking) {
-      const [ax, ay] = pullOrigin(w, h);
+      const ax = stageBox.cursor ? stageBox.cursor.x : w / 2;
+      const ay = stageBox.cursor ? stageBox.cursor.y : h / 2;
       renderSlide(slides[1], width, height, ax + ((w - width) / 2 + x + page - ax) * pullScale, ay + ((h - height) / 2 + y - ay) * pullScale, pullScale);
     } else {
       renderSlide(slides[1], width, height, (w - width) / 2 + x + page, (h - height) / 2 + y);
     }
 
-    if (shade !== cache.shade) {
-      cache.shade = shade;
-      dialog.style.setProperty("--shade", shade);
-    }
+    if (shade !== cache.shade) { cache.shade = shade; dialog.style.setProperty("--shade", shade); }
     const mapHidden = zoom <= 1 || !!(page || pull || state === "closing");
-    if (mapHidden !== cache.mapHidden) {
-      cache.mapHidden = mapHidden;
-      map.hidden = mapHidden;
-    }
+    if (mapHidden !== cache.mapHidden) { cache.mapHidden = mapHidden; map.hidden = mapHidden; }
     if (!mapHidden) {
-      const left = .5 - (w / 2 + x) / width, top = .5 - (h / 2 + y) / height;
-      const b = bounds.style;
+      const left = .5 - (w / 2 + x) / width, top = .5 - (h / 2 + y) / height, b = bounds.style;
       b.left = clamp(left, 0, 1) * 100 + "%";
       b.top = clamp(top, 0, 1) * 100 + "%";
       b.width = (clamp(left + w / width, 0, 1) - clamp(left, 0, 1)) * 100 + "%";
       b.height = (clamp(top + h / height, 0, 1) - clamp(top, 0, 1)) * 100 + "%";
     }
     const zoomed = zoom > 1;
-    if (zoomed !== cache.zoomed) {
-      cache.zoomed = zoomed;
-      stage.classList.toggle("zoomed", zoomed);
-    }
-    telemetry.drawUs = (performance.now() - t0) * 1000;
+    if (zoomed !== cache.zoomed) { cache.zoomed = zoomed; stage.classList.toggle("zoomed", zoomed); }
     telemetry.scale = effectiveScale;
     telemetry.page = page;
   }
 
-  const settled = target => Object.keys(target).every(k => Math.abs(view[k] - target[k]) < (k === "zoom" || k === "fade" ? .001 : .5));
+  const settled = target => Object.keys(target).every(k => Math.abs(view[k] - target[k]) < (k === "zoom" ? .001 : .5));
+  const scaleMs = (ratio, maxMs = SETTLE_MS, minMs = MIN_MS) =>
+    Math.max(1, Math.round(clamp(maxMs * clamp(ratio, 0, 1), Math.min(minMs, maxMs), maxMs)));
 
   function withinPhoto() {
     const { limitX, limitY } = geometry();
@@ -369,72 +216,52 @@ const lightbox = (() => {
     view.zoom = zoom;
   }
 
-  function scaledDuration(ratio, maxMs, minMs, curve) {
-    const p = clamp(ratio, 0, 1);
-    const f = curve === "log" ? Math.log1p(9 * p) / Math.LN10 : p;
-    return Math.max(1, Math.round(clamp(maxMs * f, Math.min(minMs, maxMs), maxMs)));
+  function applyPinch(zoom, from, to, start = view, min = minScale()) {
+    scaleAt(clamp(zoom, min, MAX_ZOOM), from, to, start);
+    if (view.zoom >= 1) Object.assign(view, withinPhoto());
+    if (view.zoom > 1) transition("zoom");
+    else if (view.zoom < 1) transition("pull");
   }
 
-  function travelRatio(start, target) {
-    const { w, h } = geometry();
-    let ratio = 0;
-    if ("page" in target && w) ratio = Math.max(ratio, Math.abs(target.page - start.page) / w);
-    if ("pull" in target && h) ratio = Math.max(ratio, Math.abs(target.pull - start.pull) / pullDistance(h));
-    if ("x" in target && w) ratio = Math.max(ratio, Math.abs(target.x - start.x) / w);
-    if ("y" in target && h) ratio = Math.max(ratio, Math.abs(target.y - start.y) / h);
-    if ("zoom" in target) ratio = Math.max(ratio, Math.abs(target.zoom - start.zoom) / Math.max(1, start.zoom, target.zoom));
-    return clamp(ratio, 0, 1);
-  }
-
-  function tween(duration, onStep, onDone) {
-    stopAnim();
+  function runTween(slot, duration, onStep, onDone, syncFirst = true) {
+    stopAnim(slot);
     const since = performance.now(), instant = reducedMotion.matches || duration <= 0;
-    const power = params.easePower;
     function tick(now) {
       const t = instant ? 1 : clamp((now - since) / duration, 0, 1);
-      onStep(1 - (1 - t) ** power, t);
-      if (t < 1) animation = requestAnimationFrame(tick);
-      else { animation = 0; onDone(); }
+      if (onStep(1 - (1 - t) ** EASE, t) === false) { anims[slot] = 0; return; }
+      if (t < 1) anims[slot] = requestAnimationFrame(tick);
+      else { anims[slot] = 0; onDone?.(); }
     }
-    tick(since);
+    if (syncFirst || instant) tick(since);
+    else anims[slot] = requestAnimationFrame(tick);
   }
 
   function startPageGlide(fromPage = view.page) {
-    stopPageGlide();
+    stopAnim(1);
     if (Math.abs(fromPage) < 1 || reducedMotion.matches) { view.page = 0; return; }
     view.page = fromPage;
-    const { w } = geometry();
-    const duration = scaledDuration(Math.abs(fromPage) / Math.max(1, w), 220, 120, "linear");
-    const since = performance.now(), power = params.easePower;
-    function step(now) {
-      if (!dialog.open || !isOpen() || input.axis === "x") { pageGlide = 0; return; }
-      const t = duration <= 0 ? 1 : clamp((now - since) / duration, 0, 1);
-      view.page = t >= 1 ? 0 : fromPage * ((1 - t) ** power);
+    runTween(1, scaleMs(Math.abs(fromPage) / Math.max(1, geometry().w), 220, 120), (ease, t) => {
+      if (!dialog.open || !isOpen() || input.axis === "x") return false;
+      view.page = t >= 1 ? 0 : fromPage * (1 - ease);
       draw();
-      if (t < 1) pageGlide = requestAnimationFrame(step);
-      else pageGlide = 0;
-    }
-    pageGlide = requestAnimationFrame(step);
+    }, null, false);
   }
 
   function animateTo(target, done) {
-    stopPageGlide();
-    const start = { ...view }, keys = Object.keys(target);
-    const duration = settled(target) ? 0 : scaledDuration(travelRatio(start, target), params.settleMs, params.settleMinMs, params.settleCurve);
-    tween(
-      duration,
-      (ease, t) => {
-        const k = 1 - ease;
-        for (const key of keys) view[key] = target[key] + (start[key] - target[key]) * k;
-        if (t < 1 || !done) draw();
-      },
-      done || syncTrack,
+    stopAnim(1);
+    const start = { ...view }, keys = Object.keys(target), { w, h } = geometry();
+    const ratio = Math.max(
+      "page" in target && w ? Math.abs(target.page - start.page) / w : 0,
+      "pull" in target && h ? Math.abs(target.pull - start.pull) / pullDistance(h) : 0,
+      "x" in target && w ? Math.abs(target.x - start.x) / w : 0,
+      "y" in target && h ? Math.abs(target.y - start.y) / h : 0,
+      "zoom" in target ? Math.abs(target.zoom - start.zoom) / Math.max(1, start.zoom, target.zoom) : 0,
     );
-  }
-
-  function syncZoomState() {
-    if (view.zoom > 1) transition("zoom");
-    else if (view.zoom < 1) transition("pull");
+    runTween(0, settled(target) ? 0 : scaleMs(ratio), (ease, t) => {
+      const k = 1 - ease;
+      for (const key of keys) view[key] = target[key] + (start[key] - target[key]) * k;
+      if (t < 1 || !done) draw();
+    }, done || syncTrack);
   }
 
   function finishPinch(animate) {
@@ -449,65 +276,46 @@ const lightbox = (() => {
   function zoomTo(zoom, anchor = { x: 0, y: 0 }) {
     if (!isOpen() || input.pointers.size) return;
     resetTrackInput();
-    cancelAnimationFrame(animation);
+    stopAnim(0);
     promoteDominant(false);
-    const nextZoom = clamp(zoom, 1, params.maxZoom);
+    const nextZoom = clamp(zoom, 1, MAX_ZOOM);
     scaleAt(nextZoom, anchor, anchor);
     Object.assign(view, withinPhoto());
     if (nextZoom > 1) { transition("zoom"); draw(); syncTrack(); }
     else transition("fit", { animate: false });
   }
 
-  // --- Slide & dialog lifecycle (invoked by graph edges) ---
+  // --- Slide & dialog lifecycle ---
 
   function loadSlide(slide, position, preload = false) {
     if (slide.index === position && slide.element.firstElementChild) return;
     const thumb = photoGrid.tiles[position].firstElementChild;
-    const image = new Image();
-    image.alt = thumb.alt;
-    image.draggable = false;
-    image.decoding = "sync";
-    image.src = previewUrl(thumb);
+    const image = makeImg(previewUrl(thumb), thumb.alt);
     slide.index = position;
     slide.ratio = Number(thumb.getAttribute("width")) / Number(thumb.getAttribute("height"));
-    slide.full = false;
-    slide.loading = -1;
+    slide.full = false; slide.loading = -1;
     slide.element.replaceChildren(image);
     if (preload) image.decode().catch(() => {});
   }
 
   function prewarmLowRes(center, dir) {
-    const count = photoGrid.tiles.length;
-    if (count <= 3) return;
-    const offsets = dir ? [dir * 2, dir * 3] : [2, -2, 3];
-    for (const off of offsets) {
-      const thumb = photoGrid.tiles[wrap(center + off)].firstElementChild;
-      const src = thumb && previewUrl(thumb);
-      if (!src || warmed.has(src)) continue;
-      warmed.add(src);
-      const img = new Image();
-      img.decoding = "async";
-      img.src = src;
-      img.decode?.().catch(() => {});
+    if (photoGrid.tiles.length <= 3) return;
+    for (const off of (dir ? [dir * 2, dir * 3] : [2, -2, 3])) {
+      const src = previewUrl(photoGrid.tiles[wrap(center + off)].firstElementChild);
+      if (src && !warmed.has(src)) { warmed.add(src); makeImg(src, "", "async").decode?.().catch(() => {}); }
     }
   }
 
   async function upgradeSlide(slide, position, showError = false) {
     if (slide.index !== position || slide.full || slide.loading === position) return true;
-    const link = photoGrid.tiles[position], thumb = link.firstElementChild;
-    const full = new Image();
+    const link = photoGrid.tiles[position], full = makeImg(link.href, link.firstElementChild.alt);
     slide.loading = position;
     if (showError) pending = full;
-    full.alt = thumb.alt;
-    full.draggable = false;
-    full.decoding = "sync";
-    full.src = link.href;
     try {
       await full.decode();
       if (!dialog.open || state === "closing" || slide.index !== position || slide.full) return false;
       if (showError && pending !== full) return false;
-      // Keep the low-res preview mounted behind the opaque full-res image until the slide
-      // rotates out; removing it mid-upload causes a 1-frame black flash on 120Hz/WebKit.
+      // Keep preview behind opaque full-res until rotation to avoid a 1-frame black flash on 120Hz/WebKit.
       slide.element.append(full);
       slide.full = true;
       if (slide === slides[1]) mapImg.src = full.src;
@@ -523,8 +331,6 @@ const lightbox = (() => {
   async function runUpgrades(active, pos) {
     if (!dialog.open || state === "closing" || active !== slides[1] || active.index !== pos) return;
     if (!active.full) await upgradeSlide(active, pos, true);
-    // Pre-upgrade adjacent slides to full-res once the current photo is ready so swipes
-    // land directly on an already-composited full-res layer with zero post-settle swap.
     if (dialog.open && state !== "closing" && photoGrid.tiles.length > 1 && active === slides[1] && active.index === pos) {
       upgradeSlide(slides[2], slides[2].index);
       upgradeSlide(slides[0], slides[0].index);
@@ -532,8 +338,7 @@ const lightbox = (() => {
   }
 
   function mountSlides(target, step, opening) {
-    clearTimeout(upgradeTimer);
-    upgradeTimer = 0;
+    clearTimeout(upgradeTimer); upgradeTimer = 0;
     const count = photoGrid.tiles.length;
     if (!opening && count > 1) {
       if (step === 1 || (!step && slides[2].index === target)) slides.push(slides.shift());
@@ -547,21 +352,12 @@ const lightbox = (() => {
       loadSlide(slides[2], wrap(index + 1), true);
       prewarmLowRes(index, step);
     }
-    for (let i = 0; i < slides.length; i++) slides[i].element.classList.toggle("current", i === 1);
+    slides.forEach((s, i) => s.element.classList.toggle("current", i === 1));
     const link = tile(), thumb = link.firstElementChild, active = slides[1];
     map.style.setProperty("--ratio", active.ratio);
-    mapImg.src = active.element.lastElementChild?.src || previewUrl(thumb);
+    mapImg.src = active.full ? (pending = null, link.href) : (active.element.lastElementChild?.src || previewUrl(thumb));
     notice.textContent = "";
-    if (!opening && thumb) {
-      thumb.loading = "eager";
-      thumb.decoding = "sync";
-      thumb.decode?.().catch(() => {});
-    }
-    if (active.full) {
-      pending = null;
-      mapImg.src = link.href;
-    }
-    // Debounce full-res decodes on rapid turns so blast-swiping never starves the image decoder.
+    if (!opening && thumb) { thumb.loading = "eager"; thumb.decoding = "sync"; thumb.decode?.().catch(() => {}); }
     if (opening) return () => runUpgrades(active, index);
     upgradeTimer = setTimeout(() => { upgradeTimer = 0; runUpgrades(active, index); }, 90);
     return null;
@@ -580,29 +376,20 @@ const lightbox = (() => {
 
   function absorbIntoZoom() {
     promoteDominant(false);
-    if (view.pull > 0 && view.zoom >= 1) {
-      view.zoom = pullScaleFor(view.pull);
-      view.pull = 0;
-    }
+    if (view.pull > 0 && view.zoom >= 1) { view.zoom = pullScaleFor(view.pull); view.pull = 0; }
     view.page = 0;
   }
 
   function openPhoto(position, step = 0) {
     if (state === "closing") return;
-    stopAnim();
-    stopPageGlide();
+    stopAll();
     resetTrackInput();
     input.pointers.clear();
     input.lastTap = null;
     const opening = !dialog.open;
     const startUpgrades = mountSlides(wrap(position), step, opening);
     Object.assign(view, fitted);
-    if (opening) {
-      dialog.showModal();
-      emitToggle(true);
-      measureStage();
-      syncGrid(true);
-    }
+    if (opening) { dialog.showModal(); measureStage(); syncGrid(true); }
     draw();
     syncTrack();
     startUpgrades?.();
@@ -610,13 +397,11 @@ const lightbox = (() => {
 
   function runDismiss() {
     if (!dialog.open) return;
-    stopAnim();
-    stopPageGlide();
-    clearTimeout(upgradeTimer);
-    upgradeTimer = 0;
+    stopAll();
+    clearTimeout(upgradeTimer); upgradeTimer = 0;
     if (promoteDominant(true)) draw();
     const now = performance.now();
-    if (view.pull > 0 || (input.trackMeta && input.trackMeta.wheelPull > 0)) {
+    if (view.pull > 0 || view.zoom < 1) {
       input.absorbUntil = Math.max(input.absorbUntil, now + 1800);
       input.lastAbsorbed = now;
     }
@@ -629,7 +414,6 @@ const lightbox = (() => {
     const from = returning.getBoundingClientRect(), to = tile().getBoundingClientRect();
     if (!from.width || !from.height || !to.width || !to.height) {
       tile().classList.remove("in-viewer");
-      emitToggle(false);
       if (input.absorbUntil) input.lastAbsorbed = performance.now();
       return dialog.close();
     }
@@ -637,41 +421,27 @@ const lightbox = (() => {
     map.hidden = cache.mapHidden = true;
     slides[0].element.hidden = slides[2].element.hidden = true;
     const baseW = active.w || from.width, baseH = active.h || from.height;
-    const fromX = from.left - vpRect.left, fromY = from.top - vpRect.top;
-    const toX = to.left - vpRect.left, toY = to.top - vpRect.top;
-    const fromSX = from.width / baseW, fromSY = from.height / baseH;
-    const toSX = to.width / baseW, toSY = to.height / baseH;
-    const visualScale = from.width / (geometry(1).width || baseW);
-    const duration = scaledDuration(visualScale / params.dismissScale, params.dismissMaxMs, params.dismissMinMs, params.dismissCurve);
+    const duration = scaleMs((from.width / (geometry(1).width || baseW)) / DISMISS_SCALE, DISMISS_MS);
     active.clipped = true;
     returning.style.overflow = "hidden";
-    tween(
-      duration,
-      ease => {
-        const x = fromX + (toX - fromX) * ease, y = fromY + (toY - fromY) * ease;
-        const sx = fromSX + (toSX - fromSX) * ease, sy = fromSY + (toSY - fromSY) * ease;
-        returning.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${sx}, ${sy})`;
-        returning.style.borderRadius = (5 * ease / Math.min(sx, sy)) + "px";
-        dialog.style.setProperty("--shade", startShade * (1 - ease));
-      },
-      () => {
-        // Reveal the tile and reparent the top panel back to <body> BEFORE dialog.close()
-        // so neither the photo nor the top bar can flash or drop --tuner-h to 0px.
-        tile().classList.remove("in-viewer");
-        emitToggle(false);
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-          if (input.absorbUntil) input.lastAbsorbed = performance.now();
-          dialog.close();
-        }));
-      },
-    );
+    runTween(0, duration, ease => {
+      const x = lerp(from.left, to.left, ease) - vpRect.left, y = lerp(from.top, to.top, ease) - vpRect.top;
+      const sx = lerp(from.width, to.width, ease) / baseW, sy = lerp(from.height, to.height, ease) / baseH;
+      returning.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${sx}, ${sy})`;
+      returning.style.borderRadius = (5 * ease / Math.min(sx, sy)) + "px";
+      dialog.style.setProperty("--shade", startShade * (1 - ease));
+    }, () => {
+      tile().classList.remove("in-viewer");
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (input.absorbUntil) input.lastAbsorbed = performance.now();
+        dialog.close();
+      }));
+    });
   }
 
   function finishClose() {
-    stopAnim();
-    stopPageGlide();
-    clearTimeout(upgradeTimer);
-    upgradeTimer = 0;
+    stopAll();
+    clearTimeout(upgradeTimer); upgradeTimer = 0;
     resetTrackInput();
     track.style.overflow = "";
     if (input.absorbUntil) {
@@ -680,24 +450,15 @@ const lightbox = (() => {
       input.lastAbsorbed = now;
     }
     pending = input.trackMeta = input.axis = null;
-    input.scrolled = false;
-    input.lastWheel = 0;
-    input.ignoreSnapUntil = 0;
-    stageBox.w = stageBox.h = 0;
-    stageBox.cursor = stageBox.tileAnchor = null;
-    stageBox.minScale = .15;
-    cache.synced = -1;
-    cache.layoutKey = "";
-    cache.shade = cache.zoomed = cache.mapHidden = null;
-    telemetry.scale = 1;
-    telemetry.page = 0;
+    input.scrolled = false; input.lastWheel = input.ignoreSnapUntil = 0;
+    Object.assign(stageBox, { w: 0, h: 0, cursor: null, minScale: .15 });
+    Object.assign(cache, { synced: -1, layoutKey: "", shade: null, zoomed: null, mapHidden: null });
+    telemetry.scale = 1; telemetry.page = 0;
     for (const s of slides) {
-      s.index = -1; s.full = s.clipped = false; s.loading = -1;
-      s.w = s.h = 0; s.tx = s.ty = s.scale = NaN; s.opacity = 1;
+      Object.assign(s, { index: -1, full: false, clipped: false, loading: -1, w: 0, h: 0, tx: NaN, ty: NaN, scale: NaN, opacity: 1 });
       s.element.style.cssText = "";
       s.element.replaceChildren();
     }
-    emitToggle(false);
     photoGrid.restore();
   }
 
@@ -705,7 +466,6 @@ const lightbox = (() => {
 
   const stagePoint = e => ({ x: e.clientX - stageBox.left - stageBox.w / 2, y: e.clientY - stageBox.top - stageBox.h / 2 });
 
-  // Multi-touch centroid and RMS spread relative to stage center (works for any finger count n >= 1).
   function measurePointers() {
     let x = 0, y = 0, sq = 0;
     for (const p of input.pointers.values()) { x += p.clientX; y += p.clientY; }
@@ -720,10 +480,15 @@ const lightbox = (() => {
     input.gesture.axis = fresh ? null : (view.page ? "x" : view.pull ? "y" : null);
   }
 
-  function moveOnMap(event) {
+  function mapPoint(event) {
     const r = map.getBoundingClientRect(), { width, height } = geometry();
-    view.x = (.5 - (event.clientX - r.left) / r.width) * width + input.gesture.mapX;
-    view.y = (.5 - (event.clientY - r.top) / r.height) * height + input.gesture.mapY;
+    return [(.5 - (event.clientX - r.left) / r.width) * width, (.5 - (event.clientY - r.top) / r.height) * height];
+  }
+
+  function moveOnMap(event) {
+    const [mx, my] = mapPoint(event);
+    view.x = mx + input.gesture.mapX;
+    view.y = my + input.gesture.mapY;
     Object.assign(view, withinPhoto());
   }
 
@@ -733,32 +498,21 @@ const lightbox = (() => {
     const y = view.y + dy + (!horiz && !zoomed ? view.pull : 0);
     view.x = clamp(x, Math.min(view.x, -limitX), Math.max(view.x, limitX));
     view.y = clamp(y, Math.min(view.y, -limitY), Math.max(view.y, limitY));
-    if (zoomed) return;
-    if (horiz && view.zoom === 1 && photoGrid.tiles.length > 1) view.page = clamp(x - view.x, -w, w);
-    if (!horiz && view.zoom === 1) {
-      view.pull = clamp(y - view.y, 0, pullDistance(h));
-    }
+    if (zoomed || view.zoom !== 1) return;
+    if (horiz && photoGrid.tiles.length > 1) view.page = clamp(x - view.x, -w, w);
+    if (!horiz) view.pull = clamp(y - view.y, 0, pullDistance(h));
   }
 
-  function recordSample(history, time, page, pull) {
-    let drop = 0;
-    while (drop < history.length && time - history[drop][0] >= 100) drop++;
-    if (drop) history.splice(0, drop);
-    if (history.length >= 16) history.shift();
-    history.push([time, page, pull]);
-  }
-
-  function project(history, now, value, slot) {
+  const project = (history, now, value, slot) => {
     const [time, page, pull] = history[0], dt = now - time;
     return value + (dt > 0 && dt < 120 ? (value - (slot === "page" ? page : pull)) / dt * 160 : 0);
-  }
+  };
 
   stage.onpointerdown = event => {
     if (!isOpen() || event.button !== 0) return;
     trackCursor(event);
     resetTrackInput();
-    stopAnim();
-    stopPageGlide();
+    stopAll();
     if (input.scrolled) syncTrack();
     input.pointers.set(event.pointerId, event);
     stage.setPointerCapture(event.pointerId);
@@ -766,10 +520,10 @@ const lightbox = (() => {
       const onMap = map.contains(event.target);
       input.gesture = { tap: true, backdrop: !onMap && !slides[1].element.contains(event.target), history: [], onMap };
       if (onMap) {
-        const r = map.getBoundingClientRect(), g = bounds.getBoundingClientRect(), { width, height } = geometry();
+        const g = bounds.getBoundingClientRect(), [mx, my] = mapPoint(event);
         const inside = event.clientX >= g.left && event.clientX <= g.right && event.clientY >= g.top && event.clientY <= g.bottom;
-        input.gesture.mapX = inside ? view.x - (.5 - (event.clientX - r.left) / r.width) * width : 0;
-        input.gesture.mapY = inside ? view.y - (.5 - (event.clientY - r.top) / r.height) * height : 0;
+        input.gesture.mapX = inside ? view.x - mx : 0;
+        input.gesture.mapY = inside ? view.y - my : 0;
         moveOnMap(event);
         draw();
       }
@@ -791,9 +545,10 @@ const lightbox = (() => {
       moveOnMap(event);
     } else if (input.pointers.size > 1) {
       const zoom = g.start.spread ? g.baseline.zoom * point.spread / g.start.spread : g.baseline.zoom;
-      scaleAt(clamp(zoom, minScale(), params.maxZoom), g.start, point, g.baseline);
+      scaleAt(clamp(zoom, minScale(), MAX_ZOOM), g.start, point, g.baseline);
       if (!g.start.spread && point.spread) rebase();
-      syncZoomState();
+      if (view.zoom > 1) transition("zoom");
+      else if (view.zoom < 1) transition("pull");
     } else {
       if (!g.axis) {
         const dx = point.x - g.start.x, dy = point.y - g.start.y;
@@ -812,7 +567,9 @@ const lightbox = (() => {
       }
     }
     g.last = point;
-    recordSample(g.history, event.timeStamp, view.page, view.pull);
+    while (g.history.length && event.timeStamp - g.history[0][0] >= 100) g.history.shift();
+    if (g.history.length >= 16) g.history.shift();
+    g.history.push([event.timeStamp, view.page, view.pull]);
     draw();
   };
 
@@ -848,15 +605,14 @@ const lightbox = (() => {
   stage.onpointerup = e => release(e, false);
   stage.onpointercancel = stage.onlostpointercapture = e => release(e, true);
 
-  // --- Trackpad native scroll-snap, zoom & momentum guard ---
+  // --- Trackpad native X scroll-snap, zoom & momentum guard ---
 
   function resetTrackInput() {
     clearTimeout(input.pinchTimer);
     clearTimeout(input.scrollTimer);
-    stopPageGlide();
-    input.pinch = null;
+    stopAnim(1);
+    input.pinch = input.inertia = null;
     input.wheelPinching = false;
-    input.inertia = null;
     input.ignoreSnapUntil = 0;
   }
 
@@ -864,72 +620,60 @@ const lightbox = (() => {
     if (!dialog.open || state === "closing") return;
     const { w, h, limitX, limitY } = geometry();
     if (!w || !h) return;
-    const zoomed = view.zoom > 1;
-    const hasNeighbors = !zoomed && photoGrid.tiles.length > 1;
-    const mode = (zoomed || limitX > 0 || limitY > 0) ? "none" : params.snapAxis;
-    const free = mode === "none", both = mode === "both";
-    const { swipeSpeed, pullSpeed } = params;
-    const padX = hasNeighbors ? Math.max(1, Math.round(w / swipeSpeed)) : 0;
-    const pullSpan = pullDistance(h), pullSpace = zoomed ? 0 : Math.max(1, Math.round(pullSpan / pullSpeed));
-    const key = `${w}:${h}:${limitX}:${limitY}:${zoomed}:${hasNeighbors}:${mode}:${swipeSpeed}:${pullSpeed}`;
+    const zoomed = view.zoom > 1, hasNeighbors = !zoomed && photoGrid.tiles.length > 1;
+    const padX = hasNeighbors ? Math.max(1, Math.round(w / SWIPE_SPEED)) : 0;
+    const pullSpan = pullDistance(h), pullSpace = zoomed ? 0 : Math.max(1, Math.round(pullSpan / PULL_SPEED));
+    const key = `${w}:${h}:${limitX}:${limitY}:${zoomed}:${hasNeighbors}`;
     const layoutChanged = key !== cache.layoutKey;
     if (layoutChanged) {
       cache.layoutKey = key;
       track.style.scrollSnapType = "none";
       track.style.setProperty("--w", w + "px");
       track.style.setProperty("--h", h + "px");
-      track.classList.toggle("free", free);
-      track.classList.toggle("snap-both", both);
+      track.classList.toggle("free", zoomed);
       trackSpace.style.width = (padX * 2 + w + limitX * 2) + "px";
       trackSpace.style.height = (pullSpace + h + limitY * 2) + "px";
-      snapPrev.hidden = snapNext.hidden = !hasNeighbors || free;
-      snapCurr.hidden = free;
-      if (!free) {
-        const y = both ? pullSpace : 0, sh = both ? h + "px" : "100%", cw = padX || w;
-        for (const [el, x, sw] of [[snapPrev, 0, padX], [snapCurr, padX, cw], [snapNext, padX * 2, w]]) {
-          el.style.left = x + "px"; el.style.top = y + "px";
-          el.style.width = sw + "px"; el.style.height = sh;
+      snapPrev.hidden = snapNext.hidden = !hasNeighbors;
+      snapCurr.hidden = zoomed;
+      if (!zoomed) {
+        for (const [el, x, sw] of [[snapPrev, 0, padX], [snapCurr, padX, padX || w], [snapNext, padX * 2, w]]) {
+          el.style.left = x + "px"; el.style.top = "0"; el.style.width = sw + "px"; el.style.height = "100%";
         }
       }
     }
     const originX = padX + limitX, originY = pullSpace + limitY;
-    track.scrollLeft = Math.round(originX - view.x - view.page / swipeSpeed);
-    track.scrollTop = Math.round(originY - view.y - view.pull / pullSpeed);
+    track.scrollLeft = Math.round(originX - view.x - view.page / SWIPE_SPEED);
+    track.scrollTop = Math.round(originY - view.y - view.pull / PULL_SPEED);
     if (layoutChanged) { void track.scrollLeft; track.style.scrollSnapType = ""; }
     input.trackMeta = {
-      w, h, limitX, limitY, padX, pullSpan, pullSpace, hasNeighbors, free, both, swipeSpeed, pullSpeed,
-      originX, originY, pullBase: originY, left: track.scrollLeft, top: track.scrollTop,
-      lastSl: track.scrollLeft, lastSt: track.scrollTop, wheelPull: 0, promoted: false, lockedY: false,
+      w, h, limitX, limitY, padX, pullSpan, pullSpace, hasNeighbors, originX, originY, pullBase: originY,
+      left: track.scrollLeft, top: track.scrollTop, lastSl: track.scrollLeft, lastSt: track.scrollTop,
+      promoted: false, lockedY: false,
     };
-    input.axis = null;
+    input.axis = input.inertia = null;
     input.scrolled = false;
-    input.inertia = null;
-    stopPageGlide();
+    stopAnim(1);
     clearTimeout(input.scrollTimer);
   }
 
   function onTrackScroll() {
     const meta = input.trackMeta;
     if (!dialog.open || !isOpen() || input.pointers.size || input.pinch || input.wheelPinching || view.zoom < 1 || !meta) return;
-    const { w, limitX, limitY, padX, originX, originY, pullSpan, hasNeighbors, swipeSpeed, left, top } = meta;
-    const sl = track.scrollLeft, st = track.scrollTop;
-    const now = performance.now();
-    const wheelActive = now - input.lastWheel < 45;
-    if (!wheelActive && ((animation && lastEdge === "bounce") || now < input.ignoreSnapUntil)) {
-      meta.lastSl = sl; meta.lastSt = st;
-      return;
+    const { w, limitX, limitY, padX, originX, originY, pullSpan, hasNeighbors, left, top } = meta;
+    const sl = track.scrollLeft, st = track.scrollTop, now = performance.now(), wheelActive = now - input.lastWheel < 45;
+    if (!wheelActive && ((anims[0] && lastEdge === "bounce") || now < input.ignoreSnapUntil)) {
+      meta.lastSl = sl; meta.lastSt = st; return;
     }
     if (!input.scrolled && Math.abs(sl - left) < 1 && Math.abs(st - top) < 1) return;
     const prevSl = meta.lastSl, prevSt = meta.lastSt;
-    meta.lastSl = sl;
-    meta.lastSt = st;
+    meta.lastSl = sl; meta.lastSt = st;
     input.scrolled = true;
-    stopAnim();
+    stopAnim(0);
     const zoomed = view.zoom > 1, canPage = hasNeighbors && !zoomed;
     const dx = originX - sl, dy = originY - st;
     const x = clamp(dx, -limitX, limitX), y = clamp(dy, -limitY, limitY);
     const remX = canPage ? dx - x : 0, remY = zoomed ? 0 : Math.max(0, dy - y);
-    const rawPage = canPage ? clamp(remX * swipeSpeed, -w, w) : 0;
+    const rawPage = canPage ? clamp(remX * SWIPE_SPEED, -w, w) : 0;
     const pullFor = base => zoomed ? 0 : pullSpan * clamp((base - st) / Math.max(1, base - limitY), 0, 1);
     let rawPull = pullFor(meta.pullBase);
     if (!input.axis && (remX || remY)) {
@@ -955,54 +699,67 @@ const lightbox = (() => {
     const axis = input.axis || (Math.abs(remX) >= remY ? "x" : "y");
     if (axis === "y" && rawPull >= 30) meta.lockedY = true;
     view.x = x; view.y = y;
-    if (axis === "x") { stopPageGlide(); view.page = rawPage; }
-    else if (view.page && !pageGlide) startPageGlide(view.page);
+    if (axis === "x") { stopAnim(1); view.page = rawPage; }
+    else if (view.page && !anims[1]) startPageGlide(view.page);
     view.pull = axis === "y" ? rawPull : 0;
-    if (wheelActive) meta.wheelPull = view.pull;
-    if (!zoomed && input.axis === "y" && !meta.free && !wheelActive && st === prevSt && sl !== prevSl) {
-      return onTrackScrollEnd();
-    }
+    if (!zoomed && input.axis === "y" && !wheelActive && st === prevSt && sl !== prevSl) return onTrackScrollEnd();
     if (!zoomed) {
       if (axis === "y" && view.pull) { if (state !== "pulling") transition("pull"); }
       else if (axis === "x" && view.page) { if (state !== "paging") transition("swipe"); }
     }
     draw();
-    if (!hasScrollEnd) {
-      clearTimeout(input.scrollTimer);
-      input.scrollTimer = setTimeout(onTrackScrollEnd, 150);
-    }
+    if (!hasScrollEnd) { clearTimeout(input.scrollTimer); input.scrollTimer = setTimeout(onTrackScrollEnd, 150); }
   }
 
   function onTrackScrollEnd() {
     clearTimeout(input.scrollTimer);
     const meta = input.trackMeta;
     if (!dialog.open || !isOpen() || input.pointers.size || input.pinch || input.wheelPinching || view.zoom < 1 || !meta || !input.scrolled) return;
-    const { w, padX, pullSpan, hasNeighbors, free, both } = meta;
-    const sl = track.scrollLeft, st = track.scrollTop, axis = input.axis;
-    meta.left = meta.lastSl = sl;
-    meta.top = meta.lastSt = st;
-    input.scrolled = false;
-    input.axis = null;
+    const { padX, pullSpan, hasNeighbors } = meta, sl = track.scrollLeft, st = track.scrollTop, axis = input.axis;
+    meta.left = meta.lastSl = sl; meta.top = meta.lastSt = st;
+    input.scrolled = false; input.axis = null;
     if (view.zoom > 1) return;
+    const edgeStep = hasNeighbors ? (sl >= padX * 2 - 2 ? 1 : sl <= 2 ? -1 : 0) : 0;
     if (axis === "y") {
-      const releasePull = both && input.lastWheel > 0 ? meta.wheelPull : view.pull;
-      if (pullScaleFor(releasePull, pullSpan) < dismissThreshold()) return transition("dismiss");
-      if (!meta.promoted && !meta.lockedY && !view.pull && !free && hasNeighbors && sl >= padX * 2 - 2) return transition("settle", { step: 1, immediate: true });
-      if (!meta.promoted && !meta.lockedY && !view.pull && !free && hasNeighbors && sl <= 2) return transition("settle", { step: -1, immediate: true });
+      if (pullScaleFor(view.pull, pullSpan) < dismissThreshold()) return transition("dismiss");
+      if (!meta.promoted && !meta.lockedY && !view.pull && edgeStep) return transition("settle", { step: edgeStep, immediate: true });
       return transition("bounce", { target: withinPhoto() });
     }
-    if (!free && hasNeighbors) {
-      if (sl >= padX * 2 - 2) return transition("settle", { step: 1, immediate: true });
-      if (sl <= 2) return transition("settle", { step: -1, immediate: true });
-      return transition("settle");
-    }
-    const dir = Math.sign(view.page);
-    if (axis === "x" && hasNeighbors && dir && Math.abs(view.page) > w / 2) {
-      return transition("settle", { step: -dir, target: { page: dir * w, pull: 0 } });
-    }
-    if (view.page) return transition("settle", { target: withinPhoto() });
+    if (hasNeighbors) return transition("settle", edgeStep ? { step: edgeStep, immediate: true } : {});
     if (view.pull) return transition("bounce", { target: withinPhoto() });
     syncTrack();
+  }
+
+  // Detect released 60Hz/120Hz+ macOS momentum coasting against scrollTop=0 while keeping manual holds open.
+  function detectWallInertia(event, now) {
+    if (view.zoom > 1 || input.axis !== "y" || event.deltaY >= 0 || -event.deltaY < Math.abs(event.deltaX)) {
+      input.inertia = null;
+      return false;
+    }
+    const atWall = track.scrollTop <= 1;
+    if (atWall && event.momentum === true) return true;
+    const ady = -event.deltaY, dx = event.deltaX, adx = Math.abs(dx), w = input.inertia;
+    const maxDrop = w ? Math.max(2, w.prevDy * .18) : 0;
+    const dxOk = !w || (adx <= w.prevAdx && (!adx || !w.prevDx || Math.sign(dx) === Math.sign(w.prevDx)));
+    if (!w || now - w.lastT > 45 || ady > w.prevDy || (w.prevDy - ady) > maxDrop || !dxOk) {
+      input.inertia = {
+        startT: now, startDy: ady, prevDy: ady, prevDx: dx, prevAdx: adx,
+        lastT: now, count: 1, drops: 0, pureY: adx === 0, wallHits: atWall ? 1 : 0,
+      };
+      return false;
+    }
+    if (ady < w.prevDy) w.drops++;
+    if (adx > 0) w.pureY = false;
+    if (atWall) w.wallHits++;
+    w.prevDy = ady; w.prevDx = dx; w.prevAdx = adx; w.lastT = now; w.count++;
+    if (!atWall || w.wallHits < 2) return false;
+    const elapsed = now - w.startT, dropped = w.startDy - ady;
+    const decay100 = elapsed > 0 ? Math.pow(ady / w.startDy, 100 / elapsed) : 1;
+    const fast = elapsed >= 38 && w.count >= 4 && w.drops >= 2 && w.startDy >= 14
+      && dropped >= Math.max(2, w.startDy * .07) && decay100 >= .42 && decay100 <= .90;
+    const gentle = w.pureY && elapsed >= 75 && w.count >= 6 && w.drops >= 2 && w.startDy >= 4
+      && dropped >= 2 && decay100 >= .42 && decay100 <= .88;
+    return fast || gentle;
   }
 
   track.addEventListener("scroll", onTrackScroll, { passive: true });
@@ -1015,19 +772,13 @@ const lightbox = (() => {
       if (state === "closing" && event.cancelable) event.preventDefault();
       return;
     }
-    if (now > input.absorbUntil || now - input.lastAbsorbed > 120 || event.deltaY > 0) {
-      input.absorbUntil = 0;
-      return;
-    }
+    if (now > input.absorbUntil || now - input.lastAbsorbed > 120 || event.deltaY > 0) { input.absorbUntil = 0; return; }
     input.lastAbsorbed = now;
     if (event.cancelable) event.preventDefault();
   }, { passive: false });
 
   stage.addEventListener("wheel", event => {
-    if (!isOpen() || input.pointers.size) {
-      if (event.cancelable) event.preventDefault();
-      return;
-    }
+    if (!isOpen() || input.pointers.size) { if (event.cancelable) event.preventDefault(); return; }
     trackCursor(event);
     const now = performance.now();
     if (!event.ctrlKey && !event.metaKey) {
@@ -1035,78 +786,32 @@ const lightbox = (() => {
         if (now - input.lastPinch < 60) { if (event.cancelable) event.preventDefault(); return; }
         clearTimeout(input.pinchTimer);
         input.wheelPinching = false;
-        if (view.zoom < 1) {
-          finishPinch(false);
-          if (event.cancelable) event.preventDefault();
-          return;
-        }
+        if (view.zoom < 1) { finishPinch(false); if (event.cancelable) event.preventDefault(); return; }
         syncTrack();
       }
       const gap = now - input.lastWheel, meta = input.trackMeta;
       input.lastWheel = now;
       input.ignoreSnapUntil = 0;
-      if (!hasScrollEnd && input.scrolled) {
-        clearTimeout(input.scrollTimer);
-        input.scrollTimer = setTimeout(onTrackScrollEnd, 150);
-      }
-      if (event.cancelable && input.scrolled && meta && !meta.free && meta.hasNeighbors && input.axis !== "y") {
-        const pullDown = event.deltaY < 0 && -event.deltaY > Math.abs(event.deltaX) * 1.5;
-        const sl = track.scrollLeft;
+      if (!hasScrollEnd && input.scrolled) { clearTimeout(input.scrollTimer); input.scrollTimer = setTimeout(onTrackScrollEnd, 150); }
+      if (event.cancelable && input.scrolled && meta?.hasNeighbors && input.axis !== "y") {
+        const pullDown = event.deltaY < 0 && -event.deltaY > Math.abs(event.deltaX) * 1.5, sl = track.scrollLeft;
         const step = (sl >= meta.padX * 2 - 4 && gap >= 80 && event.deltaX > 0) || (pullDown && sl > meta.padX * 1.5) ? 1
           : (sl <= 4 && gap >= 80 && event.deltaX < 0) || (pullDown && sl < meta.padX * .5) ? -1 : 0;
         if (step) {
           const carry = pullDown ? clamp(view.page + step * meta.w, -meta.w, meta.w) : 0;
           transition("settle", { step, immediate: true });
           if (pullDown) {
-            input.axis = "y";
-            input.scrolled = true;
+            input.axis = "y"; input.scrolled = true;
             if (input.trackMeta) input.trackMeta.lockedY = input.trackMeta.promoted = true;
             if (Math.abs(carry) >= 1) { startPageGlide(carry); draw(); }
           }
           return;
         }
       }
-      if (view.zoom <= 1 && input.axis === "y" && event.deltaY < 0 && -event.deltaY >= Math.abs(event.deltaX)) {
-        // Detect released macOS momentum tail coasting against scrollTop=0 (min grid size) across 60Hz/120Hz+
-        // displays so flicks dismiss promptly instead of freezing for ~1s, while holding still or manual pushing stays held.
-        const atWall = track.scrollTop <= 1;
-        if (atWall && event.momentum === true) {
-          input.scrolled = false;
-          input.axis = null;
-          if (event.cancelable) event.preventDefault();
-          return void transition("dismiss");
-        }
-        const ady = -event.deltaY, dx = event.deltaX, adx = Math.abs(dx), w = input.inertia;
-        const maxDrop = w ? Math.max(2, w.prevDy * .18) : 0;
-        const dxOk = !w || (adx <= w.prevAdx && (!adx || !w.prevDx || Math.sign(dx) === Math.sign(w.prevDx)));
-        if (!w || now - w.lastT > 45 || ady > w.prevDy || (w.prevDy - ady) > maxDrop || !dxOk) {
-          input.inertia = {
-            startT: now, startDy: ady, prevDy: ady, prevDx: dx, prevAdx: adx,
-            lastT: now, count: 1, drops: 0, pureY: adx === 0, wallHits: atWall ? 1 : 0,
-          };
-        } else {
-          if (ady < w.prevDy) w.drops++;
-          if (adx > 0) w.pureY = false;
-          if (atWall) w.wallHits++;
-          w.prevDy = ady; w.prevDx = dx; w.prevAdx = adx;
-          w.lastT = now; w.count++;
-          if (atWall && w.wallHits >= 2) {
-            const elapsed = now - w.startT, dropped = w.startDy - ady;
-            const decay100 = elapsed > 0 ? Math.pow(ady / w.startDy, 100 / elapsed) : 1;
-            const fast = elapsed >= 38 && w.count >= 4 && w.drops >= 2 && w.startDy >= 14
-              && dropped >= Math.max(2, w.startDy * .07) && decay100 >= .42 && decay100 <= .90;
-            const gentle = w.pureY && elapsed >= 75 && w.count >= 6 && w.drops >= 2 && w.startDy >= 4
-              && dropped >= 2 && decay100 >= .42 && decay100 <= .88;
-            if (fast || gentle) {
-              input.scrolled = false;
-              input.axis = null;
-              if (event.cancelable) event.preventDefault();
-              return void transition("dismiss");
-            }
-          }
-        }
-      } else {
-        input.inertia = null;
+      if (detectWallInertia(event, now)) {
+        input.scrolled = false; input.axis = null;
+        if (event.cancelable) event.preventDefault();
+        return void transition("dismiss");
       }
       if (event.cancelable && meta && Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
         const st = track.scrollTop, maxSt = meta.pullSpace + meta.limitY * 2;
@@ -1117,18 +822,13 @@ const lightbox = (() => {
     if (event.cancelable) event.preventDefault();
     const startingPinch = !input.wheelPinching;
     resetTrackInput();
-    input.axis = null;
-    input.scrolled = false;
-    input.wheelPinching = true;
-    input.lastPinch = now;
-    stopAnim();
+    input.axis = null; input.scrolled = false; input.wheelPinching = true; input.lastPinch = now;
+    stopAnim(0);
     if (startingPinch) absorbIntoZoom();
     const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? stageBox.h : 1;
-    const factor = (event.ctrlKey && event.deltaMode === 0 ? .01 : .004) * params.zoomSpeed;
+    const factor = event.ctrlKey && event.deltaMode === 0 ? .01 : .004;
     const anchor = stagePoint(event);
-    scaleAt(clamp(view.zoom * Math.exp(-event.deltaY * unit * factor), event.ctrlKey ? minScale() : 1, params.maxZoom), anchor, anchor);
-    if (view.zoom >= 1) Object.assign(view, withinPhoto());
-    syncZoomState();
+    applyPinch(view.zoom * Math.exp(-event.deltaY * unit * factor), anchor, anchor, view, event.ctrlKey ? minScale() : 1);
     draw();
     input.pinchTimer = setTimeout(() => { input.wheelPinching = false; finishPinch(false); }, 140);
   }, { passive: false });
@@ -1136,17 +836,13 @@ const lightbox = (() => {
   stage.addEventListener("gesturestart", event => {
     event.preventDefault();
     if (!isOpen() || input.pointers.size) return;
-    resetTrackInput();
-    stopAnim();
-    absorbIntoZoom();
+    resetTrackInput(); stopAnim(0); absorbIntoZoom();
     input.pinch = { baseline: { ...view }, start: stagePoint(event) };
   });
   stage.addEventListener("gesturechange", event => {
     event.preventDefault();
     if (!input.pinch || !isOpen() || input.pointers.size) return;
-    scaleAt(clamp(input.pinch.baseline.zoom * event.scale, minScale(), params.maxZoom), input.pinch.start, stagePoint(event), input.pinch.baseline);
-    if (view.zoom >= 1) Object.assign(view, withinPhoto());
-    syncZoomState();
+    applyPinch(input.pinch.baseline.zoom * event.scale, input.pinch.start, stagePoint(event), input.pinch.baseline);
     draw();
   });
   stage.addEventListener("gestureend", event => {
@@ -1165,7 +861,7 @@ const lightbox = (() => {
   dialog.oncancel = event => { event.preventDefault(); transition("dismiss"); };
   dialog.onclose = () => {
     if (dialog.open) return;
-    if (!transition("finish")) { state = "closed"; lastEdge = "finish"; emitState(); finishClose(); }
+    if (!transition("finish")) { state = "closed"; lastEdge = "finish"; finishClose(); }
   };
   dialog.onkeydown = event => {
     if (!isOpen() || input.pointers.size || event.ctrlKey || event.metaKey || event.altKey) return;
@@ -1178,8 +874,7 @@ const lightbox = (() => {
       switch (event.key) {
         case "ArrowLeft": transition("settle", { step: -1, immediate: true }); break;
         case "ArrowRight": transition("settle", { step: 1, immediate: true }); break;
-        case "+":
-        case "=": zoomTo(view.zoom * 1.5); break;
+        case "+": case "=": zoomTo(view.zoom * 1.5); break;
         case "-": zoomTo(view.zoom / 1.5); break;
         case "0": transition("fit", { animate: true }); break;
         default: return;
@@ -1199,22 +894,9 @@ const lightbox = (() => {
   }
   new ResizeObserver(refreshLayout).observe(stage);
 
-  const api = {
-    graph, defaults, config: params, telemetry,
+  return {
+    telemetry, refreshLayout,
     get state() { return state; },
     get lastEdge() { return lastEdge; },
-    setVar, setConfig, resetVars, refreshLayout,
-    onState(fn) { listeners.state.add(fn); return () => listeners.state.delete(fn); },
-    onToggle(fn) { listeners.toggle.add(fn); return () => listeners.toggle.delete(fn); },
-    debug() {
-      if (typeof lightboxDebug !== "undefined") return lightboxDebug.mount(api);
-      if (document.querySelector('script[src="js/lightbox-debug.js"]')) return null;
-      const script = document.createElement("script");
-      script.src = "js/lightbox-debug.js";
-      document.head.append(script);
-      return script;
-    },
   };
-  if (typeof location !== "undefined" && new URLSearchParams(location.search).has("debug")) api.debug();
-  return api;
 })();

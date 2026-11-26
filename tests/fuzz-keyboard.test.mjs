@@ -282,7 +282,6 @@ test("real macOS 120Hz trace replay: swipe right -> aggressive swipe down, mediu
 
   // 1) Verbatim full replay (Flick #1): swipe right -> swipe aggressively down hits st=0 at t=1667, must dismiss within ~50ms (not 1,383ms!)
   const full = createSimulator({ w: vw, h: vh, scrollY: 500, tileDims: i => i === 0 ? [1500, 1000] : [1730, 1000] });
-  full.lightbox.setConfig(realTrace.config);
   full.open(0);
   full.advance(32);
   full.startRecording();
@@ -299,7 +298,6 @@ test("real macOS 120Hz trace replay: swipe right -> aggressive swipe down, mediu
 
   // 2) Verbatim Flick #2 (t=1818..3051): manual fingers-down re-swipe MUST stay held through t=1966, then 120Hz momentum (startDy=20 with flat plateaus) MUST dismiss within ~60ms
   const flick2 = createSimulator({ w: vw, h: vh, scrollY: 500, tileDims: i => i === 0 ? [1500, 1000] : [1730, 1000] });
-  flick2.lightbox.setConfig(realTrace.config);
   flick2.open(1);
   flick2.advance(32);
   // Bring cleanly to min size (st=0) with off-snap sl=1240 as at t=1818
@@ -353,24 +351,4 @@ test("real macOS 120Hz trace replay: swipe right -> aggressive swipe down, mediu
   const snapLog = snapLift.stopRecording();
   assertNoWallFreeze(snapLog, { afterT: snapStart, maxFrozenMs: 60, label: "real-macos-post-lift-x-snap" });
   assert.equal(snapLift.dialog.open, false);
-});
-
-test("debug trace recorder captures semantic hit targets, normalized track offsets, and keyboard events cleanly", () => {
-  const e = createSimulator({ w: 1280, h: 800, tileCount: MIXED_DIMS.length, tileDims: i => MIXED_DIMS[i], loadDebug: true });
-  e.open(1); // portrait
-  e.advance(32);
-  const walk = (root, out = []) => { out.push(root); for (const c of root.children) walk(c, out); return out; };
-  const buttons = walk(e.dialog.firstElementChild).filter(n => n.tagName === "BUTTON");
-  const recBtn = buttons.find(b => b.textContent === "Rec");
-  assert.ok(recBtn, "Rec button mounted in ?debug header");
-
-  recBtn.dispatch("click");
-  assert.equal(recBtn.classList.contains("rec-on"), true);
-  e.wheelTick(0, -40, { cancelable: true, ...e.hitPhoto(0.5, 0.5) });
-  e.win.dispatch("keydown", { key: "ArrowRight", target: e.dialog });
-  recBtn.dispatch("click"); // Stop
-  assert.equal(recBtn.classList.contains("rec-on"), false);
-  assert.ok(e.win.__lbTrace, "Trace saved to window.__lbTrace");
-  assert.ok(e.win.__lbTrace.events.some(ev => ev.type === "wheel" && ev.orient === "portrait"), "Recorded wheel with portrait orientation");
-  assert.ok(e.win.__lbTrace.events.some(ev => ev.type === "keydown" && ev.key === "ArrowRight"), "Recorded keyboard event");
 });
