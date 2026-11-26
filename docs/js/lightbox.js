@@ -4,14 +4,22 @@ const lightbox = (() => {
   const SWIPE_SPEED = 2, PULL_SPEED = 1.5, DISMISS_SCALE = .78, MAX_ZOOM = 8;
   const SETTLE_MS = 350, DISMISS_MS = 350, MIN_MS = 70, EASE = 3;
 
+  const mk = (tag, cls) => Object.assign(document.createElement(tag), { className: cls });
+  const ensure = (parent, cls) => parent.querySelector("." + cls) || (el => (parent.append(el), el))(mk("div", cls));
   const dialog = document.querySelector("dialog");
   const stage = dialog.querySelector(".stage");
-  const track = stage.querySelector(".track");
-  const trackSpace = track.querySelector(".track-space");
-  const viewport = trackSpace.querySelector(".viewport");
+  for (const el of stage.querySelectorAll(".neighbor")) el.remove();
+  const track = ensure(stage, "track");
+  const trackSpace = ensure(track, "track-space");
+  const viewport = ensure(trackSpace, "viewport");
+  const map = dialog.querySelector(".minimap");
+  if (map && map.parentElement !== viewport) viewport.append(map);
+  for (const el of Array.from(stage.children)) {
+    if (el.classList?.contains("frame")) viewport.insertBefore(el, map);
+  }
+  while (viewport.querySelectorAll(".frame").length < 3) viewport.insertBefore(mk("div", "frame"), map);
   const [snapPrev, snapCurr, snapNext] = Array.from({ length: 3 }, () => {
-    const el = document.createElement("div");
-    el.className = "snap";
+    const el = mk("div", "snap");
     el.setAttribute("aria-hidden", "true");
     trackSpace.insertBefore(el, viewport);
     return el;
@@ -20,7 +28,6 @@ const lightbox = (() => {
     element, index: -1, ratio: 1, full: false, loading: -1,
     w: 0, h: 0, tx: NaN, ty: NaN, scale: NaN, opacity: 1, clipped: false,
   }));
-  const map = viewport.querySelector(".minimap");
   const mapImg = map.querySelector("img");
   const bounds = map.querySelector("span");
   const notice = dialog.querySelector("#notice");
@@ -492,8 +499,79 @@ const lightbox = (() => {
     Object.assign(view, withinPhoto());
   }
 
-  function dragBy(dx, dy, axis) {
+  function toggleDoubleTap(event) {
+    if (!isOpen() || input.pointers.size) return;
+    input.lastTap = null;
+    resetTrackInput();
+    stopAll();
+    if (view.zoom > 1) return transition("fit", { animate: true });
+    promoteDominant(false);
+    const pt = stagePoint(event), { limitX, limitY } = geometry(2);
+    transition("zoom");
+    animateTo({
+      zoom: 2,
+      x: clamp(-pt.x * 2, -limitX, limitX),
+      y: clamp(-pt.y * 2, -limitY, limitY),
+      page: 0,
+      pull: 0,
+    });
+  }
+
+  function runPanMomentum(vx0, vy0) {
+    stopAnim(0);
+    if (reducedMotion.matches) { Object.assign(view, withinPhoto()); draw(); syncTrack(); return; }
+    let vx = clamp(vx0, -4.5, 4.5), vy = clamp(vy0, -4.5, 4.5), prev = performance.now();
+    const stepAxis = (pos, v, limit, dt) => {
+      if (limit <= 0) return [0, 0];
+      const clamped = clamp(pos, -limit, limit), over = pos - clamped;
+      if (Math.abs(over) > .25) {
+        if (v * over > 0) {
+          v = v * Math.exp(-dt / 42) - over * .0005 * dt;
+        } else {
+          const omega = .016;
+          v += (-omega * omega * over - 2 * omega * v) * dt;
+          if (over * (over + v * dt) <= 0) return [clamped, 0];
+        }
+        return [pos + v * dt, v];
+      }
+      v *= Math.exp(-dt / 280);
+      return [clamped + v * dt, v];
+    };
+    function tick(now) {
+      if (!dialog.open || !isOpen() || view.zoom <= 1) { anims[0] = 0; return; }
+      const dt = clamp(now - prev, 1, 32);
+      prev = now;
+      const { limitX, limitY } = geometry();
+      [view.x, vx] = stepAxis(view.x, vx, limitX, dt);
+      [view.y, vy] = stepAxis(view.y, vy, limitY, dt);
+      const overX = view.x - clamp(view.x, -limitX, limitX);
+      const overY = view.y - clamp(view.y, -limitY, limitY);
+      if (Math.abs(overX) < .5 && Math.abs(overY) < .5 && Math.hypot(vx, vy) < .04) {
+        Object.assign(view, withinPhoto());
+        anims[0] = 0;
+        draw();
+        syncTrack();
+        return;
+      }
+      draw();
+      anims[0] = requestAnimationFrame(tick);
+    }
+    anims[0] = requestAnimationFrame(tick);
+  }
+
+  function dragBy(dx, dy, axis, touch = false) {
     const { w, h, limitX, limitY } = geometry(), horiz = axis === "x", zoomed = view.zoom > 1;
+    if (zoomed && touch) {
+      const band = (pos, delta, limit) => {
+        if (limit <= 0) return 0;
+        const over = pos - clamp(pos, -limit, limit);
+        if (over && delta * over > 0) delta *= .35 / (1 + Math.abs(over) / 140);
+        return pos + delta;
+      };
+      view.x = band(view.x, dx, limitX);
+      view.y = band(view.y, dy, limitY);
+      return;
+    }
     const x = view.x + dx + (horiz && !zoomed ? view.page : 0);
     const y = view.y + dy + (!horiz && !zoomed ? view.pull : 0);
     view.x = clamp(x, Math.min(view.x, -limitX), Math.max(view.x, limitX));
@@ -518,7 +596,10 @@ const lightbox = (() => {
     stage.setPointerCapture(event.pointerId);
     if (input.pointers.size === 1) {
       const onMap = map.contains(event.target);
-      input.gesture = { tap: true, backdrop: !onMap && !slides[1].element.contains(event.target), history: [], onMap };
+      input.gesture = {
+        tap: true, backdrop: !onMap && !slides[1].element.contains(event.target),
+        touch: event.pointerType === "touch", history: [], onMap,
+      };
       if (onMap) {
         const g = bounds.getBoundingClientRect(), [mx, my] = mapPoint(event);
         const inside = event.clientX >= g.left && event.clientX <= g.right && event.clientY >= g.top && event.clientY <= g.bottom;
@@ -533,7 +614,7 @@ const lightbox = (() => {
       if (input.pointers.size === 2) absorbIntoZoom();
     }
     rebase(input.pointers.size === 1);
-    input.gesture.history = [[event.timeStamp, view.page, view.pull]];
+    input.gesture.history = [[event.timeStamp, view.page, view.pull, view.x, view.y]];
   };
 
   stage.onpointermove = event => {
@@ -560,7 +641,7 @@ const lightbox = (() => {
         }
       }
       g.tap = false;
-      dragBy(point.x - last.x, point.y - last.y, g.axis);
+      dragBy(point.x - last.x, point.y - last.y, g.axis, g.touch);
       if (view.zoom <= 1) {
         if (g.axis === "y" && view.pull) transition("pull");
         else if (g.axis === "x" && view.page) transition("swipe");
@@ -569,7 +650,7 @@ const lightbox = (() => {
     g.last = point;
     while (g.history.length && event.timeStamp - g.history[0][0] >= 100) g.history.shift();
     if (g.history.length >= 16) g.history.shift();
-    g.history.push([event.timeStamp, view.page, view.pull]);
+    g.history.push([event.timeStamp, view.page, view.pull, view.x, view.y]);
     draw();
   };
 
@@ -580,9 +661,9 @@ const lightbox = (() => {
     if (input.pointers.size) return rebase();
     if (!g.cancelled) {
       if (g.tap && !g.onMap) {
-        if (input.lastTap && event.timeStamp - input.lastTap.time < 320 && Math.hypot(event.clientX - input.lastTap.x, event.clientY - input.lastTap.y) < 28) {
-          input.lastTap = null;
-          return transition("fit", { animate: true });
+        if (input.lastTap && event.timeStamp - input.lastTap.time < 320 && Math.hypot(event.clientX - input.lastTap.x, event.clientY - input.lastTap.y) < 28 && (!g.backdrop || view.zoom > 1)) {
+          g.doubleTapped = true;
+          return toggleDoubleTap(event);
         }
         input.lastTap = { time: event.timeStamp, x: event.clientX, y: event.clientY };
         if (g.backdrop && view.zoom === 1) return transition("dismiss");
@@ -597,7 +678,18 @@ const lightbox = (() => {
     }
     if (state === "pulling") return transition("bounce", { target: view.zoom < 1 ? fitted : withinPhoto() });
     if (state === "paging") return transition("settle", { target: withinPhoto() });
-    if (view.zoom > 1) return animateTo(withinPhoto());
+    if (view.zoom > 1) {
+      if (!g.cancelled && g.touch && !g.onMap && g.history.length) {
+        const first = g.history[0], last = g.history[g.history.length - 1];
+        const dt = event.timeStamp - first[0], idle = event.timeStamp - last[0];
+        const vx = dt >= 8 && dt < 140 && idle < 65 ? (view.x - first[3]) / dt : 0;
+        const vy = dt >= 8 && dt < 140 && idle < 65 ? (view.y - first[4]) / dt : 0;
+        const { limitX, limitY } = geometry();
+        const over = Math.abs(view.x) > limitX + .5 || Math.abs(view.y) > limitY + .5;
+        if (over || Math.hypot(vx, vy) > .15) return runPanMomentum(vx, vy);
+      }
+      return animateTo(withinPhoto());
+    }
     if (!settled(fitted)) return transition("fit", { animate: true });
     syncTrack();
   }
@@ -855,8 +947,11 @@ const lightbox = (() => {
   // --- Dialog, keyboard & resize bindings ---
 
   photoGrid.onOpen(position => transition("open", { position }));
-  stage.ondblclick = () => {
-    if (isOpen() && !input.pointers.size && input.gesture?.tap && !input.gesture.onMap) transition("fit", { animate: true });
+  stage.ondblclick = event => {
+    const g = input.gesture;
+    if (isOpen() && !input.pointers.size && g?.tap && !g.onMap && !g.doubleTapped && (!g.backdrop || view.zoom > 1)) {
+      toggleDoubleTap(event);
+    }
   };
   dialog.oncancel = event => { event.preventDefault(); transition("dismiss"); };
   dialog.onclose = () => {

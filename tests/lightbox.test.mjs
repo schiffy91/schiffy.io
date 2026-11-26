@@ -711,6 +711,133 @@ test("zoom, pan, pinch (touch, ctrl+wheel, Safari gesture), double-tap fit, and 
   assert.equal(e.dialog.open, false);
 });
 
+test("double-click / double-tap toggles 2x zoom centered on tap point with graceful edge clamping and no double-toggle", () => {
+  // 1) Landscape 3:2 photo (1200x800 in 1200x800 viewport -> 2x is 2400x1600, limitX=600, limitY=400)
+  const e = createSimulator({ w: 1200, h: 800, tileDims: i => i === 0 ? [1800, 1200] : [1200, 1800] });
+  e.open(0);
+  e.advance(32);
+
+  // Double-click off-center detail at (420, 320) -> pt = (-180, -80); also dispatch browser dblclick right after pointerup #2
+  e.pointerEvent("pointerdown", { pointerId: 1, button: 0, pointerType: "mouse", clientX: 420, clientY: 320, target: e.currentFrame() });
+  e.pointerEvent("pointerup", { pointerId: 1, button: 0, pointerType: "mouse", clientX: 420, clientY: 320 });
+  e.advance(90);
+  e.pointerEvent("pointerdown", { pointerId: 1, button: 0, pointerType: "mouse", clientX: 420, clientY: 320, target: e.currentFrame() });
+  e.pointerEvent("pointerup", { pointerId: 1, button: 0, pointerType: "mouse", clientX: 420, clientY: 320 });
+  e.stage.dispatch("dblclick", { clientX: 420, clientY: 320 }); // must NOT double-toggle back to 1x!
+  e.advance(380);
+
+  assert.equal(e.lightbox.state, "zoomed", "Double-click zoomed in to 2x and did not double-toggle");
+  assert.equal(e.map.hidden, false);
+  const r1 = e.currentFrame().getBoundingClientRect();
+  assert.ok(Math.abs(r1.width - 2400) < 1 && Math.abs(r1.height - 1600) < 1, `Zoomed to exact 2x (${r1.width}x${r1.height})`);
+  // Tapped point (-180, -80) moves to viewport center: left = (1200-2400)/2 + 360 = -240, top = (800-1600)/2 + 160 = -240
+  assert.ok(Math.abs(r1.left - -240) < 1.5, `Tapped X centered cleanly (left=${r1.left})`);
+  assert.ok(Math.abs(r1.top - -240) < 1.5, `Tapped Y centered cleanly (top=${r1.top})`);
+
+  // Double-click again while zoomed -> returns cleanly to 1x viewing
+  e.advance(400);
+  e.pointerEvent("pointerdown", { pointerId: 1, button: 0, pointerType: "mouse", clientX: 600, clientY: 400, target: e.currentFrame() });
+  e.pointerEvent("pointerup", { pointerId: 1, button: 0, pointerType: "mouse", clientX: 600, clientY: 400 });
+  e.advance(90);
+  e.pointerEvent("pointerdown", { pointerId: 1, button: 0, pointerType: "mouse", clientX: 600, clientY: 400, target: e.currentFrame() });
+  e.pointerEvent("pointerup", { pointerId: 1, button: 0, pointerType: "mouse", clientX: 600, clientY: 400 });
+  e.stage.dispatch("dblclick", { clientX: 600, clientY: 400 });
+  e.advance(380);
+  assert.equal(e.lightbox.state, "viewing");
+  assert.ok(Math.abs(e.currentFrame().getBoundingClientRect().width - 1200) < 1);
+
+  // Double-click near top-left corner (60, 40) -> clamped gracefully flush with viewport edge (no void!)
+  e.advance(400);
+  e.pointerEvent("pointerdown", { pointerId: 1, button: 0, pointerType: "mouse", clientX: 60, clientY: 40, target: e.currentFrame() });
+  e.pointerEvent("pointerup", { pointerId: 1, button: 0, pointerType: "mouse", clientX: 60, clientY: 40 });
+  e.advance(90);
+  e.pointerEvent("pointerdown", { pointerId: 1, button: 0, pointerType: "mouse", clientX: 60, clientY: 40, target: e.currentFrame() });
+  e.pointerEvent("pointerup", { pointerId: 1, button: 0, pointerType: "mouse", clientX: 60, clientY: 40 });
+  e.advance(380);
+  const rEdge = e.currentFrame().getBoundingClientRect();
+  assert.equal(e.lightbox.state, "zoomed");
+  assert.ok(Math.abs(rEdge.left - 0) < 1.5 && Math.abs(rEdge.top - 0) < 1.5, `Corner double-click clamped flush to edge (${rEdge.left}, ${rEdge.top})`);
+
+  // 2) Portrait 2:3 photo (533.3x800 -> at 2x is 1066.7x1600, limitX=0, limitY=400)
+  const p = createSimulator({ w: 1200, h: 800, tileDims: () => [1200, 1800] });
+  p.open(0);
+  p.advance(32);
+  p.pointerEvent("pointerdown", { pointerId: 1, button: 0, pointerType: "touch", clientX: 580, clientY: 100, target: p.currentFrame() });
+  p.pointerEvent("pointerup", { pointerId: 1, button: 0, pointerType: "touch", clientX: 580, clientY: 100 });
+  p.advance(90);
+  p.pointerEvent("pointerdown", { pointerId: 1, button: 0, pointerType: "touch", clientX: 580, clientY: 100, target: p.currentFrame() });
+  p.pointerEvent("pointerup", { pointerId: 1, button: 0, pointerType: "touch", clientX: 580, clientY: 100 });
+  p.advance(380);
+  const rp = p.currentFrame().getBoundingClientRect();
+  assert.equal(p.lightbox.state, "zoomed");
+  assert.ok(Math.abs(rp.left - (1200 - rp.width) / 2) < 1.5, `Portrait stays horizontally centered when 2x fits width (left=${rp.left})`);
+  assert.ok(Math.abs(rp.top - 0) < 1.5, `Portrait top edge clamped flush (top=${rp.top})`);
+});
+
+test("mobile touch-only zoomed pan momentum with edge rubber-banding (desktop mouse stops cleanly without momentum or overscroll)", () => {
+  // Desktop mouse: zero momentum and zero overscroll past edges
+  const desk = createSimulator({ w: 1200, h: 800, tileDims: () => [1800, 1200] });
+  desk.open(0);
+  desk.advance(32);
+  desk.dialog.dispatch("keydown", { key: "+" }); // 1.5x
+  desk.dialog.dispatch("keydown", { key: "+" }); // 2.25x -> 2700x1800, limitX=750
+  desk.pointerEvent("pointerdown", { pointerId: 1, button: 0, pointerType: "mouse", clientX: 600, clientY: 400, target: desk.currentFrame() });
+  desk.stepFrame(16);
+  desk.pointerEvent("pointermove", { pointerId: 1, button: 0, pointerType: "mouse", clientX: 720, clientY: 400 });
+  desk.stepFrame(16);
+  desk.pointerEvent("pointerup", { pointerId: 1, button: 0, pointerType: "mouse", clientX: 720, clientY: 400 });
+  const deskAtRelease = desk.currentFrame().getBoundingClientRect().left;
+  desk.advance(400);
+  assert.ok(Math.abs(desk.currentFrame().getBoundingClientRect().left - deskAtRelease) < 0.5, "Desktop mouse drag has zero post-release momentum");
+
+  // Desktop mouse hard drag past edge stays strictly clamped (left <= 0)
+  desk.pointerEvent("pointerdown", { pointerId: 1, button: 0, pointerType: "mouse", clientX: 100, clientY: 400, target: desk.currentFrame() });
+  desk.stepFrame(16);
+  desk.pointerEvent("pointermove", { pointerId: 1, button: 0, pointerType: "mouse", clientX: 1150, clientY: 400 });
+  assert.ok(desk.currentFrame().getBoundingClientRect().left <= 0.5, "Desktop mouse drag never rubber-bands past edge");
+  desk.pointerEvent("pointerup", { pointerId: 1, button: 0, pointerType: "mouse", clientX: 1150, clientY: 400 });
+
+  // Mobile touch: interior fling coasts smoothly with momentum
+  const mob = createSimulator({ w: 1200, h: 800, tileDims: () => [1800, 1200] });
+  mob.open(0);
+  mob.advance(32);
+  mob.dialog.dispatch("keydown", { key: "+" });
+  mob.dialog.dispatch("keydown", { key: "+" }); // 2.25x -> limitX=750, starts centered (left = -750)
+  mob.pointerEvent("pointerdown", { pointerId: 1, button: 0, pointerType: "touch", clientX: 500, clientY: 400, target: mob.currentFrame() });
+  mob.stepFrame(16);
+  mob.pointerEvent("pointermove", { pointerId: 1, button: 0, pointerType: "touch", clientX: 560, clientY: 400 });
+  mob.stepFrame(16);
+  mob.pointerEvent("pointermove", { pointerId: 1, button: 0, pointerType: "touch", clientX: 620, clientY: 400 });
+  mob.pointerEvent("pointerup", { pointerId: 1, button: 0, pointerType: "touch", clientX: 620, clientY: 400 });
+  const mobAtRelease = mob.currentFrame().getBoundingClientRect().left;
+  mob.advance(800);
+  const mobFinal = mob.currentFrame().getBoundingClientRect().left;
+  assert.ok(mobFinal - mobAtRelease > 100, `Mobile touch fling coasted with momentum (${mobAtRelease.toFixed(1)} -> ${mobFinal.toFixed(1)})`);
+  assert.ok(mobFinal <= 0.5, "Settled cleanly inside photo bounds");
+
+  // Mobile touch hard fling into left edge rubber-bands past edge then settles cleanly back to left=0 without oscillation
+  mob.startRecording();
+  mob.pointerEvent("pointerdown", { pointerId: 2, button: 0, pointerType: "touch", clientX: 200, clientY: 400, target: mob.currentFrame() });
+  for (let i = 1; i <= 5; i++) {
+    mob.stepFrame(16);
+    mob.pointerEvent("pointermove", { pointerId: 2, button: 0, pointerType: "touch", clientX: 200 + i * 160, clientY: 400 });
+  }
+  const overDuringDrag = mob.currentFrame().getBoundingClientRect().left;
+  assert.ok(overDuringDrag > 5, `Mobile touch drag rubber-banded past edge (left=${overDuringDrag.toFixed(1)}px)`);
+  mob.pointerEvent("pointerup", { pointerId: 2, button: 0, pointerType: "touch", clientX: 1000, clientY: 400 });
+  mob.advance(900);
+  const rubberLog = mob.stopRecording();
+  const peakLeft = Math.max(...rubberLog.map(f => f.rect.left));
+  assert.ok(peakLeft > overDuringDrag, `Fling coasted slightly deeper into rubber band (${overDuringDrag.toFixed(1)} -> ${peakLeft.toFixed(1)}px)`);
+  const endLeft = mob.currentFrame().getBoundingClientRect().left;
+  assert.ok(Math.abs(endLeft - 0) < 0.5, `Rubber-band settled back to exact edge (left=${endLeft.toFixed(2)})`);
+  // Verify no oscillation past edge into interior after bouncing back
+  const peakIdx = rubberLog.findIndex(f => f.rect.left === peakLeft);
+  for (let i = peakIdx + 1; i < rubberLog.length; i++) {
+    assert.ok(rubberLog[i].rect.left >= -0.5, `Rubber-band return never bounced back past edge into interior (left=${rubberLog[i].rect.left})`);
+  }
+});
+
 test("zoomed in: trackpad scroll, pointer drag, and arrow keys pan within bounds and never paginate or pull-dismiss", () => {
   // Test both landscape (Photo 0) and portrait (Photo 1, where slight zoom has limitX=0)
   for (const startIdx of [0, 1]) {

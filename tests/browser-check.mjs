@@ -447,6 +447,39 @@ async function run() {
     assert.equal(afterMidFlick.alt, beforeMidFlick.next, `mid-flick-pull: kept new dominant photo ${beforeMidFlick.next} (never reverted to ${beforeMidFlick.curr})`);
     console.log(`PASS mid-flick-swipe-down: stayed on new photo ${afterMidFlick.alt} (did not revert to ${beforeMidFlick.curr})`);
 
+    // 9) Double-click on full-screen image zooms smoothly to 2x centered on tap point (edge-clamped), second double-click returns to 1x
+    const dblBefore = await chrome.evalJs(`(() => {
+      const r = document.querySelector(".frame.current").getBoundingClientRect();
+      return { left: r.left, top: r.top, width: r.width, height: r.height };
+    })()`);
+    const clickX = Math.round(dblBefore.left + dblBefore.width * 0.25);
+    const clickY = Math.round(dblBefore.top + dblBefore.height * 0.35);
+    for (const clickCount of [1, 2]) {
+      await chrome.send("Input.dispatchMouseEvent", { type: "mousePressed", x: clickX, y: clickY, button: "left", clickCount });
+      await chrome.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: clickX, y: clickY, button: "left", clickCount });
+      await sleep(50);
+    }
+    await sleep(420);
+    const dblZoomed = await chrome.evalJs(`(() => {
+      const r = document.querySelector(".frame.current").getBoundingClientRect();
+      return { state: lightbox.state, left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
+    })()`);
+    assert.equal(dblZoomed.state, "zoomed", "double-click: zoomed in to 2x without double-toggling");
+    assert.ok(Math.abs(dblZoomed.width - dblBefore.width * 2) < 2, `double-click: exact 2x width (${dblZoomed.width.toFixed(1)} vs ${(dblBefore.width * 2).toFixed(1)})`);
+    if (dblZoomed.width >= 1280) assert.ok(dblZoomed.left <= 1 && dblZoomed.right >= 1279, `double-click: no horizontal edge void (${dblZoomed.left.toFixed(1)}..${dblZoomed.right.toFixed(1)})`);
+    if (dblZoomed.height >= 800) assert.ok(dblZoomed.top <= 1 && dblZoomed.bottom >= 799, `double-click: no vertical edge void (${dblZoomed.top.toFixed(1)}..${dblZoomed.bottom.toFixed(1)})`);
+    await sleep(360);
+    for (const clickCount of [1, 2]) {
+      await chrome.send("Input.dispatchMouseEvent", { type: "mousePressed", x: 640, y: 400, button: "left", clickCount });
+      await chrome.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: 640, y: 400, button: "left", clickCount });
+      await sleep(50);
+    }
+    await sleep(420);
+    const dblReset = await chrome.evalJs(`({ state: lightbox.state, width: document.querySelector(".frame.current").getBoundingClientRect().width })`);
+    assert.equal(dblReset.state, "viewing", "double-click: second double-click returned to 1x viewing");
+    assert.ok(Math.abs(dblReset.width - dblBefore.width) < 2, "double-click: width returned to 1x");
+    console.log(`PASS double-click-2x: ${dblBefore.width.toFixed(0)}px -> ${dblZoomed.width.toFixed(0)}px (2x) -> ${dblReset.width.toFixed(0)}px (1x)`);
+
     assert.equal(chrome.errors.length, 0, `Zero console/runtime errors (got: ${chrome.errors.join("; ")})`);
     console.log("\nALL REAL-CHROME rAF FRAME CHECKS PASSED (0 errors).");
   } finally {
