@@ -40,8 +40,8 @@ const lightbox = (() => {
   const stageBox = { left: 0, top: 0, w: 0, h: 0, cursor: null, minScale: .15 };
   const cache = { synced: -1, layoutKey: "", shade: null, zoomed: null, mapHidden: null };
   const input = {
-    pointers: new Map(), gesture: null, lastTap: null, pinch: null,
-    pinchTimer: 0, scrollTimer: 0, wheelPinching: false, lastPinch: 0,
+    pointers: new Map(), seen: new Map(), gesture: null, lastTap: null, pinch: null,
+    pinchTimer: 0, scrollTimer: 0, ghostTimer: 0, wheelPinching: false, lastPinch: 0,
     trackMeta: null, axis: null, scrolled: false, lastWheel: 0,
     absorbUntil: 0, lastAbsorbed: 0, inertia: null, ignoreSnapUntil: 0,
   };
@@ -275,7 +275,7 @@ const lightbox = (() => {
     if (!isOpen() || input.pointers.size) return;
     if (view.zoom < dismissThreshold()) transition("dismiss");
     else if (view.zoom < 1) transition("bounce", { target: fitted });
-    else if (view.zoom === 1) transition("fit", { animate: false });
+    else if (view.zoom < 1.05) transition("fit", { animate: view.zoom > 1 });
     else if (animate) animateTo(withinPhoto());
     else syncTrack();
   }
@@ -392,6 +392,7 @@ const lightbox = (() => {
     stopAll();
     resetTrackInput();
     input.pointers.clear();
+    input.seen.clear();
     input.lastTap = null;
     const opening = !dialog.open;
     const startUpgrades = mountSlides(wrap(position), step, opening);
@@ -415,6 +416,7 @@ const lightbox = (() => {
     resetTrackInput();
     track.style.overflow = "hidden";
     input.pointers.clear();
+    input.seen.clear();
     syncGrid();
     const active = slides[1], returning = active.element;
     const vpRect = viewport.getBoundingClientRect();
@@ -450,6 +452,8 @@ const lightbox = (() => {
     stopAll();
     clearTimeout(upgradeTimer); upgradeTimer = 0;
     resetTrackInput();
+    input.pointers.clear();
+    input.seen.clear();
     track.style.overflow = "";
     if (input.absorbUntil) {
       const now = performance.now();
@@ -485,6 +489,7 @@ const lightbox = (() => {
     input.gesture.start = input.gesture.last = measurePointers();
     input.gesture.baseline = { ...view };
     input.gesture.axis = fresh ? null : (view.page ? "x" : view.pull ? "y" : null);
+    input.gesture.cancelled = false;
   }
 
   function mapPoint(event) {
@@ -592,8 +597,14 @@ const lightbox = (() => {
     resetTrackInput();
     stopAll();
     if (input.scrolled) syncTrack();
+    // A primary touch pointer always starts a fresh touch sequence; purge any ghost pointers dropped by mobile browsers.
+    if (event.pointerType === "touch" && event.isPrimary) {
+      for (const [id, p] of input.pointers) if (p.pointerType === "touch") { input.pointers.delete(id); input.seen.delete(id); }
+    }
+    input.pointers.delete(event.pointerId);
     input.pointers.set(event.pointerId, event);
-    stage.setPointerCapture(event.pointerId);
+    input.seen.set(event.pointerId, performance.now());
+    try { stage.setPointerCapture(event.pointerId); } catch {}
     if (input.pointers.size === 1) {
       const onMap = map.contains(event.target);
       input.gesture = {
@@ -609,6 +620,7 @@ const lightbox = (() => {
         draw();
       }
     } else {
+      input.gesture ??= { tap: false, backdrop: false, touch: event.pointerType === "touch", history: [], onMap: false };
       input.gesture.tap = input.gesture.onMap = false;
       input.lastTap = null;
       if (input.pointers.size === 2) absorbIntoZoom();
@@ -620,7 +632,9 @@ const lightbox = (() => {
   stage.onpointermove = event => {
     if (isOpen()) trackCursor(event);
     if (!input.pointers.has(event.pointerId)) return;
+    input.pointers.delete(event.pointerId);
     input.pointers.set(event.pointerId, event);
+    input.seen.set(event.pointerId, performance.now());
     const g = input.gesture, point = measurePointers(), last = g.last;
     if (g.onMap) {
       moveOnMap(event);
@@ -656,7 +670,9 @@ const lightbox = (() => {
 
   function release(event, cancelled) {
     if (!input.pointers.delete(event.pointerId)) return;
+    input.seen.delete(event.pointerId);
     const g = input.gesture;
+    if (!g) return syncTrack();
     g.cancelled ||= cancelled;
     if (input.pointers.size) return rebase();
     if (!g.cancelled) {
@@ -679,6 +695,7 @@ const lightbox = (() => {
     if (state === "pulling") return transition("bounce", { target: view.zoom < 1 ? fitted : withinPhoto() });
     if (state === "paging") return transition("settle", { target: withinPhoto() });
     if (view.zoom > 1) {
+      if (view.zoom < 1.05) return transition("fit", { animate: true });
       if (!g.cancelled && g.touch && !g.onMap && g.history.length) {
         const first = g.history[0], last = g.history[g.history.length - 1];
         const dt = event.timeStamp - first[0], idle = event.timeStamp - last[0];
@@ -690,18 +707,83 @@ const lightbox = (() => {
       }
       return animateTo(withinPhoto());
     }
-    if (!settled(fitted)) return transition("fit", { animate: true });
+    if (state !== "viewing" || !settled(fitted)) return transition("fit", { animate: !settled(fitted) });
     syncTrack();
   }
 
-  stage.onpointerup = e => release(e, false);
-  stage.onpointercancel = stage.onlostpointercapture = e => release(e, true);
+  stage.onpointerup = stage.onlostpointercapture = e => release(e, false);
+  stage.onpointercancel = e => release(e, true);
+  window.addEventListener?.("pointerup", e => release(e, false));
+  window.addEventListener?.("pointercancel", e => release(e, true));
+
+  // Reconcile against OS touch count so a dropped mobile pointerup can never strand a ghost finger in input.pointers.
+  const flushStalePointers = (cancelled = false, touchOnly = false) => {
+    if (!input.pointers.size) return;
+    const stale = [...input.pointers.values()].filter(p => !touchOnly || p.pointerType === "touch");
+    for (const p of stale) {
+      release({ pointerId: p.pointerId, clientX: p.clientX, clientY: p.clientY, timeStamp: performance.now() }, cancelled);
+    }
+  };
+  const trimGhostTouches = (live, tap = false) => {
+    const touchIds = [];
+    for (const [id, p] of input.pointers) if (p.pointerType === "touch") touchIds.push(id);
+    const excess = touchIds.length - live;
+    if (excess <= 0) return;
+    for (let i = 0; i < excess; i++) {
+      input.pointers.delete(touchIds[i]);
+      input.seen.delete(touchIds[i]);
+    }
+    if (!input.pointers.size) return;
+    if (input.pointers.size === 1) {
+      const [only] = input.pointers.values();
+      const onMap = map.contains(only.target);
+      input.gesture = {
+        tap, backdrop: !onMap && !slides[1].element.contains(only.target),
+        touch: only.pointerType === "touch",
+        history: [[only.timeStamp, view.page, view.pull, view.x, view.y]], onMap, mapX: 0, mapY: 0,
+      };
+      rebase(true);
+    } else {
+      rebase(false);
+    }
+  };
+  const reconcileTouches = (type, event) => {
+    if (!event.touches || !input.pointers.size) return;
+    const live = event.touches.length;
+    if (type === "touchend" || type === "touchcancel") {
+      clearTimeout(input.ghostTimer);
+      input.ghostTimer = setTimeout(() => {
+        if (live === 0) flushStalePointers(false, true);
+        else trimGhostTouches(live);
+      }, 60);
+      return;
+    }
+    if (type === "touchstart") { clearTimeout(input.ghostTimer); return trimGhostTouches(live, true); }
+    let touchCount = 0, oldestId = null;
+    for (const [id, p] of input.pointers) {
+      if (p.pointerType === "touch") {
+        if (!touchCount) oldestId = id;
+        touchCount++;
+      }
+    }
+    if (touchCount <= live) clearTimeout(input.ghostTimer);
+    else if (performance.now() - (input.seen.get(oldestId) ?? 0) >= 80) {
+      clearTimeout(input.ghostTimer);
+      trimGhostTouches(live);
+    }
+  };
+  for (const type of ["touchstart", "touchmove", "touchend", "touchcancel"]) {
+    window.addEventListener?.(type, e => reconcileTouches(type, e), { passive: true });
+  }
+  window.addEventListener?.("blur", () => flushStalePointers(true));
+  document.addEventListener?.("visibilitychange", () => { if (document.hidden) flushStalePointers(true); });
 
   // --- Trackpad native X scroll-snap, zoom & momentum guard ---
 
   function resetTrackInput() {
     clearTimeout(input.pinchTimer);
     clearTimeout(input.scrollTimer);
+    clearTimeout(input.ghostTimer);
     stopAnim(1);
     input.pinch = input.inertia = null;
     input.wheelPinching = false;

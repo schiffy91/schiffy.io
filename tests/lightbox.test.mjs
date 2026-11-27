@@ -1000,6 +1000,168 @@ test("hot path: zero forced reflows, layout reads/writes, or root --shade writes
   assert.equal(vRes.transformWrites, 300);
 });
 
+test("mobile lockup recovery: dropped pointerup, ghost touch pointers, throwing capture, near-1x zoom, and cancelled 2nd finger", () => {
+  // 1) Dropped pointerup on 2nd finger after pinching lower recovers via touchend zero-finger watchdog and dismisses
+  {
+    const e = createSimulator({ w: 393, h: 852 });
+    e.open(0);
+    e.advance(32);
+    const frame = e.currentFrame();
+    e.pointerEvent("pointerdown", { pointerId: 1, pointerType: "touch", isPrimary: true, button: 0, clientX: 60, clientY: 426, target: frame });
+    e.pointerEvent("pointerdown", { pointerId: 2, pointerType: "touch", isPrimary: false, button: 0, clientX: 333, clientY: 426, target: frame });
+    e.stepFrame(16);
+    e.pointerEvent("pointermove", { pointerId: 1, pointerType: "touch", isPrimary: true, button: 0, clientX: 165, clientY: 426 });
+    e.pointerEvent("pointermove", { pointerId: 2, pointerType: "touch", isPrimary: false, button: 0, clientX: 228, clientY: 426 });
+    assert.ok(e.lightbox.telemetry.scale < 0.78, "Pinched below dismiss threshold");
+    // Only finger 1 gets pointerup; finger 2 drops pointerup and only OS touchend (0 touches) fires
+    e.pointerEvent("pointerup", { pointerId: 1, pointerType: "touch", isPrimary: true, button: 0, clientX: 165, clientY: 426 });
+    e.win.dispatch("touchend", { touches: [] });
+    e.advance(80);
+    assert.equal(e.lightbox.state, "closing", "Zero-touch watchdog flushes ghost pointer and dismisses");
+    e.advance(420);
+    assert.equal(e.dialog.open, false);
+  }
+
+  // 2) Dropped pointerup with NO touchend recovers on next primary touch so 1-finger swipe paginates instead of zooming
+  {
+    const e = createSimulator({ w: 393, h: 852 });
+    e.open(0);
+    e.advance(32);
+    const frame = e.currentFrame();
+    // Ghost pointer stranded without pointerup or touchend
+    e.pointerEvent("pointerdown", { pointerId: 10, pointerType: "touch", isPrimary: true, button: 0, clientX: 200, clientY: 426, target: frame });
+    e.stepFrame(16);
+    // Next real single-finger swipe left with isPrimary: true must purge ghost and change photo
+    e.pointerEvent("pointerdown", { pointerId: 11, pointerType: "touch", isPrimary: true, button: 0, clientX: 340, clientY: 426, target: frame });
+    e.stepFrame(16);
+    e.pointerEvent("pointermove", { pointerId: 11, pointerType: "touch", isPrimary: true, button: 0, clientX: 40, clientY: 426 });
+    assert.equal(e.lightbox.state, "paging", "Single-finger swipe enters paging instead of ghost pinch-zoom");
+    assert.equal(e.lightbox.telemetry.scale, 1);
+    e.pointerEvent("pointerup", { pointerId: 11, pointerType: "touch", isPrimary: true, button: 0, clientX: 40, clientY: 426 });
+    e.advance(420);
+    assert.equal(e.currentFrame().firstElementChild.alt, "Photo 1", "Photo changes cleanly after ghost purge");
+  }
+
+  // 3) Worst-case WebKit bug: dropped pointerup AND next single touch arrives with isPrimary: false -> touchstart reconciles
+  {
+    const e = createSimulator({ w: 393, h: 852 });
+    e.open(0);
+    e.advance(32);
+    const frame = e.currentFrame();
+    e.pointerEvent("pointerdown", { pointerId: 20, pointerType: "touch", isPrimary: true, button: 0, clientX: 200, clientY: 426, target: frame });
+    e.advance(100);
+    e.pointerEvent("pointerdown", { pointerId: 21, pointerType: "touch", isPrimary: false, button: 0, clientX: 340, clientY: 426, target: frame });
+    e.win.dispatch("touchstart", { touches: [{}] });
+    e.stepFrame(16);
+    e.pointerEvent("pointermove", { pointerId: 21, pointerType: "touch", isPrimary: false, button: 0, clientX: 40, clientY: 426 });
+    assert.equal(e.lightbox.state, "paging", "touchstart live=1 trims ghost even when isPrimary is false");
+    e.pointerEvent("pointerup", { pointerId: 21, pointerType: "touch", isPrimary: false, button: 0, clientX: 40, clientY: 426 });
+    e.advance(420);
+    assert.equal(e.currentFrame().firstElementChild.alt, "Photo 1");
+  }
+
+  // 4) Dropped pointerup on 2nd finger while 1st finger stays down recovers via touchend(live=1), then lifting 1st dismisses
+  {
+    const e = createSimulator({ w: 393, h: 852 });
+    e.open(0);
+    e.advance(32);
+    const frame = e.currentFrame();
+    e.pointerEvent("pointerdown", { pointerId: 30, pointerType: "touch", isPrimary: true, button: 0, clientX: 60, clientY: 426, target: frame });
+    e.pointerEvent("pointerdown", { pointerId: 31, pointerType: "touch", isPrimary: false, button: 0, clientX: 333, clientY: 426, target: frame });
+    e.stepFrame(16);
+    e.pointerEvent("pointermove", { pointerId: 30, pointerType: "touch", isPrimary: true, button: 0, clientX: 165, clientY: 426 });
+    e.pointerEvent("pointermove", { pointerId: 31, pointerType: "touch", isPrimary: false, button: 0, clientX: 228, clientY: 426 });
+    // Finger 31 drops pointerup; finger 30 keeps moving slightly, OS reports touches.length === 1
+    e.stepFrame(16);
+    e.pointerEvent("pointermove", { pointerId: 30, pointerType: "touch", isPrimary: true, button: 0, clientX: 166, clientY: 426 });
+    e.win.dispatch("touchend", { touches: [{}] });
+    e.advance(80);
+    // Lifting remaining finger 30 must now reach size===0 and dismiss
+    e.pointerEvent("pointerup", { pointerId: 30, pointerType: "touch", isPrimary: true, button: 0, clientX: 166, clientY: 426 });
+    assert.equal(e.lightbox.state, "closing", "Dismisses once remaining live finger lifts");
+    e.advance(420);
+    assert.equal(e.dialog.open, false);
+  }
+
+  // 5) Throwing setPointerCapture + off-stage window pointerup still dismisses immediately
+  {
+    const e = createSimulator({ w: 393, h: 852 });
+    e.stage.setPointerCapture = () => { throw new Error("NotFoundError"); };
+    e.open(0);
+    e.advance(32);
+    const frame = e.currentFrame();
+    e.pointerEvent("pointerdown", { pointerId: 40, pointerType: "touch", isPrimary: true, button: 0, clientX: 60, clientY: 426, target: frame });
+    e.pointerEvent("pointerdown", { pointerId: 41, pointerType: "touch", isPrimary: false, button: 0, clientX: 333, clientY: 426, target: frame });
+    e.stepFrame(16);
+    e.pointerEvent("pointermove", { pointerId: 40, pointerType: "touch", isPrimary: true, button: 0, clientX: 165, clientY: 426 });
+    e.pointerEvent("pointermove", { pointerId: 41, pointerType: "touch", isPrimary: false, button: 0, clientX: 228, clientY: 426 });
+    e.pointerEvent("pointerup", { pointerId: 40, pointerType: "touch", isPrimary: true, button: 0, clientX: 165, clientY: 426 });
+    e.win.dispatch("pointerup", { pointerId: 41, pointerType: "touch", isPrimary: false, button: 0, clientX: 228, clientY: 426 });
+    assert.equal(e.lightbox.state, "closing");
+    e.advance(420);
+    assert.equal(e.dialog.open, false);
+  }
+
+  // 6) Zombie near-1x zoom (1.03x) and exact-1x release from zoomed snap cleanly to viewing so swipe & pull work
+  {
+    const e = createSimulator({ w: 393, h: 852 });
+    e.open(0);
+    e.advance(32);
+    const frame = e.currentFrame();
+    e.pointerEvent("pointerdown", { pointerId: 50, pointerType: "touch", isPrimary: true, button: 0, clientX: 146, clientY: 426, target: frame });
+    e.pointerEvent("pointerdown", { pointerId: 51, pointerType: "touch", isPrimary: false, button: 0, clientX: 246, clientY: 426, target: frame });
+    e.stepFrame(16);
+    // Zoom in to 2x, then back down to 1.03x
+    e.pointerEvent("pointermove", { pointerId: 50, pointerType: "touch", isPrimary: true, button: 0, clientX: 96, clientY: 426 });
+    e.pointerEvent("pointermove", { pointerId: 51, pointerType: "touch", isPrimary: false, button: 0, clientX: 296, clientY: 426 });
+    assert.equal(e.lightbox.state, "zoomed");
+    e.pointerEvent("pointermove", { pointerId: 50, pointerType: "touch", isPrimary: true, button: 0, clientX: 144.5, clientY: 426 });
+    e.pointerEvent("pointermove", { pointerId: 51, pointerType: "touch", isPrimary: false, button: 0, clientX: 247.5, clientY: 426 });
+    e.pointerEvent("pointerup", { pointerId: 50, pointerType: "touch", isPrimary: true, button: 0, clientX: 144.5, clientY: 426 });
+    e.pointerEvent("pointerup", { pointerId: 51, pointerType: "touch", isPrimary: false, button: 0, clientX: 247.5, clientY: 426 });
+    e.advance(250);
+    assert.equal(e.lightbox.state, "viewing", "Near-1x zoom snaps back to viewing");
+    assert.equal(e.lightbox.telemetry.scale, 1);
+    // Swipe left immediately advances photo
+    e.pointerEvent("pointerdown", { pointerId: 52, pointerType: "touch", isPrimary: true, button: 0, clientX: 340, clientY: 426, target: frame });
+    e.stepFrame(16);
+    e.pointerEvent("pointermove", { pointerId: 52, pointerType: "touch", isPrimary: true, button: 0, clientX: 40, clientY: 426 });
+    e.pointerEvent("pointerup", { pointerId: 52, pointerType: "touch", isPrimary: true, button: 0, clientX: 40, clientY: 426 });
+    e.advance(420);
+    assert.equal(e.currentFrame().firstElementChild.alt, "Photo 1");
+  }
+
+  // 7) Cancelled 2nd finger, lostpointercapture, and window blur never block dismiss or trap pointers
+  {
+    const e = createSimulator({ w: 393, h: 852 });
+    e.open(0);
+    e.advance(32);
+    const frame = e.currentFrame();
+    e.pointerEvent("pointerdown", { pointerId: 60, pointerType: "touch", isPrimary: true, button: 0, clientX: 60, clientY: 426, target: frame });
+    e.pointerEvent("pointerdown", { pointerId: 61, pointerType: "touch", isPrimary: false, button: 0, clientX: 333, clientY: 426, target: frame });
+    e.stepFrame(16);
+    e.pointerEvent("pointermove", { pointerId: 60, pointerType: "touch", isPrimary: true, button: 0, clientX: 165, clientY: 426 });
+    e.pointerEvent("pointermove", { pointerId: 61, pointerType: "touch", isPrimary: false, button: 0, clientX: 228, clientY: 426 });
+    // 2nd finger is cancelled, 1st finger releases normally via lostpointercapture -> still dismisses
+    e.pointerEvent("pointercancel", { pointerId: 61, pointerType: "touch", isPrimary: false, button: 0, clientX: 228, clientY: 426 });
+    e.stage.dispatch("lostpointercapture", { pointerId: 60, pointerType: "touch", isPrimary: true, button: 0, clientX: 165, clientY: 426 });
+    assert.equal(e.lightbox.state, "closing");
+    e.advance(420);
+    assert.equal(e.dialog.open, false);
+
+    // Reopen, strand a pointer, blur window -> flushes cleanly so next drag works
+    e.open(0);
+    e.advance(32);
+    e.pointerEvent("pointerdown", { pointerId: 70, pointerType: "touch", isPrimary: true, button: 0, clientX: 200, clientY: 426, target: e.currentFrame() });
+    e.win.dispatch("blur");
+    e.advance(32);
+    e.pointerEvent("pointerdown", { pointerId: 71, pointerType: "touch", isPrimary: false, button: 0, clientX: 340, clientY: 426, target: e.currentFrame() });
+    e.stepFrame(16);
+    e.pointerEvent("pointermove", { pointerId: 71, pointerType: "touch", isPrimary: false, button: 0, clientX: 40, clientY: 426 });
+    assert.equal(e.lightbox.state, "paging", "Window blur flushed stale pointer");
+  }
+});
+
 if (process.argv.includes("--bench")) {
   const e = createSimulator();
   e.open(0);

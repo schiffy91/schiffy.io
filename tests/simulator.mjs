@@ -166,6 +166,7 @@ export function createSimulator({
       setPointerCapture() {},
       addEventListener(type, fn) { if (!ls.has(type)) ls.set(type, []); ls.get(type).push(fn); },
       dispatch(type, ev = {}) {
+        ev.type ??= type;
         ev.cancelable ??= true;
         ev.preventDefault = () => { if (!ev.cancelable) stats.interventions++; else ev.defaultPrevented = true; };
         ev.stopPropagation ??= () => {};
