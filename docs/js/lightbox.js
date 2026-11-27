@@ -99,7 +99,7 @@ const lightbox = (() => {
 
   const wrap = pos => ((pos % photoGrid.tiles.length) + photoGrid.tiles.length) % photoGrid.tiles.length;
   const tile = (offset = 0) => photoGrid.tiles[wrap(index + offset)];
-  const previewUrl = img => img.currentSrc || img.src;
+  const previewUrl = img => img.currentSrc || img.src || img.dataset?.thumb || img.dataset?.src || "";
   const makeImg = (src, alt = "", decoding = "sync") => Object.assign(new Image(), { alt, draggable: false, decoding, src });
   const pullDistance = (h = stageBox.h) => Math.max(1, Math.round(h * .65));
   const minScale = () => (cache.synced !== index && syncGrid(), stageBox.minScale);
@@ -364,7 +364,10 @@ const lightbox = (() => {
     map.style.setProperty("--ratio", active.ratio);
     mapImg.src = active.full ? (pending = null, link.href) : (active.element.lastElementChild?.src || previewUrl(thumb));
     notice.textContent = "";
-    if (!opening && thumb) { thumb.loading = "eager"; thumb.decoding = "sync"; thumb.decode?.().catch(() => {}); }
+    if (!opening && thumb) {
+      if (!thumb.src && thumb.dataset?.thumb) thumb.src = thumb.dataset.thumb;
+      thumb.loading = "eager"; thumb.decoding = "sync"; thumb.decode?.().catch(() => {});
+    }
     if (opening) return () => runUpgrades(active, index);
     upgradeTimer = setTimeout(() => { upgradeTimer = 0; runUpgrades(active, index); }, 90);
     return null;

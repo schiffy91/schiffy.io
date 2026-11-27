@@ -17,16 +17,10 @@ void render(string root, string templatePath) {
         var url = HTTPUrl.encode(name);
         var full = f"{photos}/medium-res/{url}";
         var preview = FileSystem.isFile(f"{root}/{photos}/low-res/{name}") ? f"{photos}/low-res/{url}" : full;
-        var sources = "";
-        if (FileSystem.isFile(f"{root}/{photos}/thumbnail/{name}")) {
-            var small = Photographs.header(f"{root}/{photos}/thumbnail/{name}");
-            var large = preview == full ? size : Photographs.header(f"{root}/{photos}/low-res/{name}");
-            if (small.width < large.width) {
-                sources = f" srcset=\"{photos}/thumbnail/{url} {small.width}w, {preview} {large.width}w\" sizes=\"auto, 100vw\"";
-            }
-        }
+        var thumb = FileSystem.isFile(f"{root}/{photos}/thumbnail/{name}") ? f"{photos}/thumbnail/{url}" : preview;
+        var upgrade = preview != thumb ? f" data-src=\"{preview}\"" : "";
         var number = tiles.length + 1;
-        var image = f"<img src=\"{preview}\"{sources} width=\"{size.width}\" height=\"{size.height}\" alt=\"Photograph {number}\" loading=\"lazy\" decoding=\"async\">";
+        var image = f"<img data-thumb=\"{thumb}\"{upgrade} width=\"{size.width}\" height=\"{size.height}\" alt=\"Photograph {number}\" decoding=\"async\">";
         tiles.push(f"    <a href=\"{full}\" style=\"--w:{size.width};--h:{size.height}\">{image}</a>");
     }
     var html = template.replace(marker, tiles.join("\n"));

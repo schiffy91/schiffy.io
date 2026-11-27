@@ -34,9 +34,11 @@ function findChrome() {
 }
 
 function startStaticServer(root) {
+  const requests = [];
   return new Promise(resolve => {
     const server = http.createServer((req, res) => {
       const urlPath = (req.url || "/").split("?")[0];
+      requests.push(urlPath);
       const rel = urlPath === "/" ? "index.html" : urlPath.replace(/^\/+/, "");
       const file = path.resolve(root, rel);
       if (!file.startsWith(root) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
@@ -46,7 +48,7 @@ function startStaticServer(root) {
       res.writeHead(200, { "Content-Type": MIME[path.extname(file)] || "application/octet-stream" });
       fs.createReadStream(file).pipe(res);
     });
-    server.listen(0, "127.0.0.1", () => resolve({ server, port: server.address().port }));
+    server.listen(0, "127.0.0.1", () => resolve({ server, port: server.address().port, requests }));
   });
 }
 
@@ -164,7 +166,7 @@ function assertMonotonicReturn(samples, peakIndex, targetLeft, label) {
 
 async function run() {
   const chromeBin = findChrome();
-  const { server, port } = await startStaticServer(DOCS_DIR);
+  const { server, port, requests } = await startStaticServer(DOCS_DIR);
   const chrome = await launchChrome(chromeBin);
 
   try {
@@ -175,7 +177,35 @@ async function run() {
     });
 
     await chrome.send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
-    await sleep(600);
+    await sleep(800);
+
+    // 0) Progressive 3-tier LoD: thumbnails load first, visible tiles upgrade to low-res, zero offscreen preload waste
+    const thumbReqs = requests.filter(u => u.includes("/thumbnail/"));
+    const lowReqs = requests.filter(u => u.includes("/low-res/"));
+    const medReqs = requests.filter(u => u.includes("/medium-res/"));
+    const firstThumbIdx = requests.findIndex(u => u.includes("/thumbnail/"));
+    const firstLowIdx = requests.findIndex(u => u.includes("/low-res/"));
+    assert.ok(thumbReqs.length > 0, "LoD: thumbnails loaded on initial viewport");
+    assert.ok(lowReqs.length > 0, "LoD: visible tiles upgraded to low-res");
+    assert.equal(medReqs.length, 0, "LoD: zero medium-res downloaded on initial grid load");
+    assert.ok(firstThumbIdx >= 0 && firstThumbIdx < firstLowIdx, `LoD: thumbnails start before low-res (${firstThumbIdx} < ${firstLowIdx})`);
+    assert.ok(lowReqs.length < 40, `LoD: shuffle-before-load avoids downloading offscreen low-res (${lowReqs.length}/88)`);
+    const gridAudit = await chrome.evalJs(`(() => {
+      const imgs = [...document.querySelectorAll(".gallery img")];
+      const visible = imgs.filter(img => {
+        const r = img.getBoundingClientRect();
+        return r.bottom > 0 && r.top < window.innerHeight;
+      });
+      return {
+        visibleCount: visible.length,
+        broken: visible.filter(img => !img.complete || img.naturalWidth === 0).length,
+        upgraded: visible.filter(img => img.src.includes("/low-res/")).length,
+      };
+    })()`);
+    assert.ok(gridAudit.visibleCount > 0, "LoD: visible tiles rendered");
+    assert.equal(gridAudit.broken, 0, "LoD: zero broken visible tiles");
+    assert.equal(gridAudit.upgraded, gridAudit.visibleCount, `LoD: all visible tiles upgraded to low-res (${gridAudit.upgraded}/${gridAudit.visibleCount})`);
+    console.log(`PASS progressive-lod: ${thumbReqs.length} thumbs -> ${lowReqs.length} low-res (0 medium-res), ${gridAudit.upgraded}/${gridAudit.visibleCount} visible upgraded, 0 broken`);
 
     // Install real rAF frame recorder
     await chrome.evalJs(`(() => {
